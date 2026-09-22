@@ -30,6 +30,10 @@ def _temp(d: bytes) -> int:
     return d[0] - 40
 
 
+def _lambda(d: bytes) -> float:
+    return _word(d) * 2 / 65536
+
+
 FUEL_SYSTEM_STATUS = {
     0x00: "not in use",
     0x01: "open loop (engine cold)",
@@ -86,13 +90,24 @@ PIDS: dict[int, PidInfo] = {
         PidInfo(0x1C, "OBD standard", "", lambda d: OBD_STANDARDS.get(d[0], f"0x{d[0]:02X}")),
         PidInfo(0x1F, "Run time since engine start", "s", _word),
         PidInfo(0x21, "Distance with MIL on", "km", _word),
+        # Wideband (air-fuel ratio) sensors, used by most modern engines for the upstream sensor.
+        *(
+            PidInfo(base + i, f"Wideband O2 {label} lambda", "λ", _lambda)
+            for base in (0x24, 0x34)
+            for i, label in enumerate(O2_LABELS)
+        ),
         PidInfo(0x2C, "Commanded EGR", "%", _percent),
         PidInfo(0x2D, "EGR error", "%", _trim),
         PidInfo(0x2E, "Commanded evap purge", "%", _percent),
         PidInfo(0x2F, "Fuel tank level", "%", _percent),
         PidInfo(0x30, "Warm-ups since codes cleared", "", lambda d: d[0]),
         PidInfo(0x31, "Distance since codes cleared", "km", _word),
+        PidInfo(0x32, "Evap system vapor pressure", "Pa", lambda d: int.from_bytes(d[:2], "big", signed=True) / 4),
         PidInfo(0x33, "Barometric pressure", "kPa", lambda d: d[0]),
+        *(
+            PidInfo(0x3C + i, f"Catalyst temperature {label}", "°C", lambda d: _word(d) / 10 - 40)
+            for i, label in enumerate(["B1S1", "B2S1", "B1S2", "B2S2"])
+        ),
         PidInfo(0x42, "Control module voltage", "V", lambda d: _word(d) / 1000),
         PidInfo(0x43, "Absolute load", "%", lambda d: _word(d) * 100 / 255),
         PidInfo(0x44, "Commanded air-fuel equivalence ratio", "λ", lambda d: _word(d) / 32768),
@@ -104,8 +119,13 @@ PIDS: dict[int, PidInfo] = {
         PidInfo(0x4C, "Commanded throttle actuator", "%", _percent),
         PidInfo(0x4D, "Time run with MIL on", "min", _word),
         PidInfo(0x4E, "Time since codes cleared", "min", _word),
+        PidInfo(0x5A, "Relative accelerator pedal position", "%", _percent),
         PidInfo(0x5C, "Engine oil temperature", "°C", _temp),
         PidInfo(0x5E, "Engine fuel rate", "L/h", lambda d: _word(d) / 20),
+        PidInfo(0x61, "Driver demand torque", "%", lambda d: d[0] - 125),
+        PidInfo(0x62, "Actual engine torque", "%", lambda d: d[0] - 125),
+        PidInfo(0x63, "Engine reference torque", "Nm", _word),
+        PidInfo(0xA6, "Odometer", "km", lambda d: int.from_bytes(d[:4], "big") / 10),
     ]
 }
 
@@ -113,7 +133,8 @@ ALIASES = {
     "load": 0x04, "coolant": 0x05, "stft1": 0x06, "ltft1": 0x07, "stft2": 0x08, "ltft2": 0x09,
     "map": 0x0B, "rpm": 0x0C, "speed": 0x0D, "timing": 0x0E, "iat": 0x0F, "maf": 0x10,
     "throttle": 0x11, "o2b1s1": 0x14, "o2b1s2": 0x15, "o2b2s1": 0x18, "o2b2s2": 0x19,
-    "runtime": 0x1F, "fuel": 0x2F, "baro": 0x33, "ambient": 0x46,
+    "runtime": 0x1F, "fuel": 0x2F, "baro": 0x33, "cat1": 0x3C, "ambient": 0x46,
+    "pedal": 0x49, "fuelrate": 0x5E, "torque": 0x62, "odometer": 0xA6,
 }
 
 

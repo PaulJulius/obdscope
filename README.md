@@ -1,8 +1,9 @@
 # veepeak-reader
 
 A command-line tool for reading OBD-II data through a **Veepeak OBDCheck BLE**
-(ELM327-compatible, Bluetooth Low Energy) adapter. It was built for a 2001 Ford
-Expedition XLT but works with any OBD-II vehicle.
+(ELM327-compatible, Bluetooth Low Energy) adapter. It's used with a 2001 Ford
+Expedition XLT and a 2019 Toyota RAV4 Adventure, but works with any OBD-II
+vehicle. The protocol is detected automatically.
 
 ## Setup
 
@@ -27,11 +28,11 @@ uv run veepeak info                 # protocol, VIN, check-engine light, readine
 uv run veepeak pids                 # read every supported sensor once
 uv run veepeak live                 # stream RPM, speed, temps, fuel trims...
 uv run veepeak live rpm maf o2b1s1 --interval 0.5 --csv drive.csv
-uv run veepeak dtc                  # stored + pending trouble codes and freeze frame
+uv run veepeak dtc                  # stored, pending, permanent codes and freeze frame
 uv run veepeak clear-dtc            # clear codes (asks for confirmation)
 uv run veepeak raw                  # interactive ELM327 console
 uv run veepeak raw ATRV 010C        # one-shot raw commands
-uv run veepeak probe 1100 11FF      # sweep Ford mode 22 identifiers
+uv run veepeak probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
 ```
 
 Global options go **before** the command:
@@ -39,13 +40,14 @@ Global options go **before** the command:
 | Option | Purpose |
 | --- | --- |
 | `--address UUID` | connect to a specific adapter (macOS shows a UUID, not a MAC) |
-| `--protocol 1` | skip auto-detect and use J1850 PWM directly (a little faster on the Expedition) |
+| `--protocol N` | skip auto-detect: `1` for the Expedition (J1850 PWM), `6` for the RAV4 (CAN) |
 | `--metric` | metric units (default is °F / mph / psi) |
 | `--log FILE` | record every raw command and response, useful for figuring out odd behaviour |
 
 `live` accepts aliases (`rpm speed coolant load throttle stft1 ltft1 stft2 ltft2
-map iat maf timing o2b1s1 o2b1s2 o2b2s1 o2b2s2 fuel baro ambient runtime`) or
-hex PIDs (`0C`).
+map iat maf timing o2b1s1 o2b1s2 o2b2s1 o2b2s2 fuel baro cat1 ambient pedal
+fuelrate torque odometer runtime`) or hex PIDs (`0C`). PIDs the vehicle doesn't
+support are skipped, so e.g. the bank 2 trims drop out on the RAV4's 4-cylinder.
 
 ## Notes on the 2001 Expedition
 
@@ -68,6 +70,28 @@ hex PIDs (`0C`).
   means yourself, for example by watching it change while the truck warms up.
   Probing only reads data. It never writes to the PCM.
 
+## Notes on the 2019 RAV4 Adventure
+
+- **Protocol:** The RAV4 uses **ISO 15765-4 CAN, 11-bit, 500 kbaud** (ELM327
+  protocol 6). Several modules can answer the same request, commonly the
+  engine (`7E8`) and transmission (`7E9`). For single values (`live`, freeze
+  frame) the tool uses the engine's answer. `pids` and `info` label each
+  reply with the module that sent it.
+- **VIN:** The RAV4 reports it, so `info` shows it.
+- **More data:** Expect many more PIDs than the Expedition. These include
+  catalyst temperature (`cat1`), accelerator pedal, fuel level, ambient
+  temperature, control module voltage, and possibly odometer (`odometer`,
+  PID A6, which only some 2019+ vehicles support). The 2.5L engine's upstream
+  O2 sensor is a wideband air-fuel sensor, so it shows up as `Wideband O2 B1S1
+  lambda` (PID 24 or 34) rather than a 0–1 V reading. 1.000 is stoichiometric.
+- **Permanent codes:** `dtc` also lists permanent codes (mode 0A, MY2010+).
+  These can't be cleared with `clear-dtc`. The car clears them itself after
+  the fault is repaired and the related monitor passes.
+- **Enhanced Toyota data (mode 22):** On CAN, `probe` sends its requests
+  straight to the engine computer (ID `7E0`) instead of broadcasting. Toyota's
+  mode 22 identifiers aren't published, so treat the output as raw material to
+  investigate. To probe the transmission, use `--header 7E1`.
+
 ## Development
 
 ```sh
@@ -79,6 +103,6 @@ needed. Code layout:
 
 - `transport.py`: BLE connection and GATT notify/write handling
 - `elm327.py`: AT commands, error handling, J1850/CAN frame parsing
-- `obd.py`: OBD services (modes 01, 02, 03/07, 04, 09, 22)
+- `obd.py`: OBD services (modes 01, 02, 03/07/0A, 04, 09, 22), ECU naming
 - `pids.py` and `dtc.py`: decoders and descriptions
 - `cli.py`: the `veepeak` command

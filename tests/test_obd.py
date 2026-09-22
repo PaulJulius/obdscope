@@ -4,7 +4,7 @@ import pytest
 
 from veepeak_reader.dtc import decode_dtcs
 from veepeak_reader.elm327 import Elm327, ElmError, NoData, parse_response
-from veepeak_reader.obd import NegativeResponse, Vehicle
+from veepeak_reader.obd import NegativeResponse, Vehicle, ecu_name, primary
 from veepeak_reader.pids import PIDS, decode_monitor_status, decode_supported, format_value, parse_pid
 
 
@@ -30,6 +30,14 @@ PWM_INIT = {
     "ATSP0": "OK",
     "0100": "SEARCHING...\r41 6B 10 41 00 BE 3E B8 11 C9",
     "ATDPN": "A1",
+}
+
+
+# 2019 RAV4-style CAN car: engine (7E8) and transmission (7E9) both answer 0100.
+CAN_INIT = {
+    **PWM_INIT,
+    "0100": "7E9 06 41 00 98 18 80 11\r7E8 06 41 00 BE 3F A8 13",
+    "ATDPN": "A6",
 }
 
 
@@ -89,9 +97,34 @@ async def test_no_dtcs_when_no_data():
 
 
 async def test_stored_dtcs_can_skips_count_byte():
-    can_init = {**PWM_INIT, "0100": "7E8 06 41 00 BE 3E B8 11", "ATDPN": "A6"}
-    v, _ = await make_vehicle({"03": "7E8 06 43 02 01 71 01 74"}, init=can_init)
+    v, _ = await make_vehicle({"03": "7E8 06 43 02 01 71 01 74"}, init=CAN_INIT)
     assert await v.dtcs() == {"7E8": ["P0171", "P0174"]}
+
+
+async def test_can_multi_ecu_prefers_engine():
+    v, _ = await make_vehicle({"010D": "7E9 03 41 0D 40\r7E8 03 41 0D 41"}, init=CAN_INIT)
+    assert v.elm.protocol == "6" and v.elm.is_can
+    per_ecu = await v.pid(0x0D)
+    assert set(per_ecu) == {"7E8", "7E9"}
+    assert primary(per_ecu) == bytes([0x41])
+    assert ecu_name("7E9") == "7E9 (transmission)" and ecu_name("7EB") == "7EB"
+
+
+async def test_can_supported_pids_union_across_ecus():
+    v, _ = await make_vehicle({}, init=CAN_INIT)
+    supported = await v.supported_pids()
+    assert {0x01, 0x0C, 0x1C, 0x20} <= supported
+
+
+async def test_permanent_dtcs_can():
+    v, _ = await make_vehicle({"0A": "7E8 04 4A 01 04 20\r7E9 02 4A 00"}, init=CAN_INIT)
+    assert await v.dtcs(0x0A) == {"7E8": ["P0420"], "7E9": []}
+
+
+async def test_vin_can_multi_frame():
+    lines = ["7E8 10 14 49 02 01 32 54 33", "7E8 21 57 46 52 45 56 37 4B", "7E8 22 57 31 32 33 34 35 36"]
+    v, _ = await make_vehicle({"0902": "\r".join(lines)}, init=CAN_INIT)
+    assert await v.vin() == "2T3WFREV7KW123456"
 
 
 async def test_vin_j1850_multi_message():
@@ -151,6 +184,13 @@ def test_monitor_status():
         "Misfire": True, "Fuel system": True, "Comprehensive components": True,
         "Catalyst": True, "Evaporative system": False, "Oxygen sensor": True, "Oxygen sensor heater": True,
     }
+
+
+def test_modern_pid_decoders():
+    assert PIDS[0x34].decode(bytes.fromhex("80008000")) == 1.0  # wideband lambda
+    assert PIDS[0x3C].decode(bytes.fromhex("1F40")) == 760.0  # catalyst temp, °C
+    assert PIDS[0xA6].decode((123456).to_bytes(4, "big")) == 12345.6  # odometer, km
+    assert PIDS[0x62].decode(bytes([0x96])) == 25  # actual torque, %
 
 
 def test_units_and_aliases():

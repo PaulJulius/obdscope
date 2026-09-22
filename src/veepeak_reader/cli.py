@@ -12,12 +12,13 @@ from contextlib import asynccontextmanager
 
 from .dtc import decode_dtc, describe
 from .elm327 import Elm327, ElmError, NoData
-from .obd import NegativeResponse, Vehicle
+from .obd import NegativeResponse, Vehicle, ecu_name, primary
 from .pids import PIDS, decode_monitor_status, format_value, parse_pid
 from .transport import BleTransport, TransportError, discover
 
 DEFAULT_LIVE = ["rpm", "speed", "coolant", "load", "throttle", "stft1", "ltft1", "stft2", "ltft2"]
 FORD_PWM_PCM_HEADER = "C410F1"  # priority C4, target PCM (10), tester (F1)
+CAN_ENGINE_HEADER = "7E0"  # physical request ID of the engine ECU (answers on 7E8)
 
 
 def status(message: str) -> None:
@@ -58,10 +59,10 @@ async def cmd_info(args) -> None:
         print(f"VIN:         {vin or 'not reported (mode 09 is uncommon before MY2005)'}")
         supported = await v.supported_pids()
         if 0x1C in supported:
-            print(f"OBD type:    {PIDS[0x1C].decode(next(iter((await v.pid(0x1C)).values())))}")
+            print(f"OBD type:    {PIDS[0x1C].decode(primary(await v.pid(0x1C)))}")
         for ecu, data in (await v.pid(0x01)).items():
             ms = decode_monitor_status(data)
-            print(f"\nECU {ecu}:  MIL {'ON' if ms.mil_on else 'off'}, {ms.dtc_count} stored code(s)")
+            print(f"\nECU {ecu_name(ecu)}:  MIL {'ON' if ms.mil_on else 'off'}, {ms.dtc_count} stored code(s)")
             print("Readiness monitors:")
             for name, complete in ms.monitors:
                 print(f"  {name:<28} {'complete' if complete else 'NOT complete'}")
@@ -71,19 +72,17 @@ async def cmd_info(args) -> None:
 async def cmd_pids(args) -> None:
     async with session(args) as v:
         for pid in sorted(await v.supported_pids()):
-            if pid % 0x20 == 0 or pid == 0x01:
+            if pid % 0x20 == 0 or pid in (0x01, 0x41):
                 continue  # bitmask / monitor PIDs are shown by `info`
             try:
                 per_ecu = await v.pid(pid)
             except (NoData, NegativeResponse):
                 continue
+            info = PIDS.get(pid)
             for ecu, data in per_ecu.items():
-                info = PIDS.get(pid)
-                if info:
-                    value = format_value(info.decode(data), info.unit, args.imperial)
-                    print(f"{pid:02X}  {info.name:<38} {value}")
-                else:
-                    print(f"{pid:02X}  {'(undecoded)':<38} {data.hex(' ').upper()}")
+                value = format_value(info.decode(data), info.unit, args.imperial) if info else data.hex(" ").upper()
+                source = f"  [{ecu_name(ecu)}]" if len(per_ecu) > 1 else ""
+                print(f"{pid:02X}  {info.name if info else '(undecoded)':<38} {value}{source}")
 
 
 async def cmd_live(args) -> None:
@@ -111,7 +110,7 @@ async def cmd_live(args) -> None:
                 raw_values, shown = [], []
                 for p in pids:
                     try:
-                        value = PIDS[p].decode(next(iter((await v.pid(p)).values())))
+                        value = PIDS[p].decode(primary(await v.pid(p)))
                     except (NoData, NegativeResponse):
                         value = ""
                     raw_values.append(value)
@@ -128,20 +127,22 @@ async def cmd_live(args) -> None:
 
 async def cmd_dtc(args) -> None:
     async with session(args) as v:
-        for label, mode in (("Stored", 0x03), ("Pending", 0x07)):
+        for label, mode in (("Stored", 0x03), ("Pending", 0x07), ("Permanent", 0x0A)):
             codes = await v.dtcs(mode)
             print(f"{label} codes:")
-            if not any(codes.values()):
+            if mode == 0x0A and not codes:
+                print("  not supported (permanent codes exist on MY2010+ vehicles)")
+            elif not any(codes.values()):
                 print("  none")
             for ecu, ecu_codes in codes.items():
                 for code in ecu_codes:
-                    print(f"  {code}  {describe(code)}  (ECU {ecu})")
+                    print(f"  {code}  {describe(code)}  (ECU {ecu_name(ecu)})")
         await _print_freeze_frame(v, args.imperial)
 
 
 async def _print_freeze_frame(v: Vehicle, imperial: bool) -> None:
     try:
-        trigger = next(iter((await v.freeze_frame_pid(0x02)).values()))
+        trigger = primary(await v.freeze_frame_pid(0x02))
     except (NoData, NegativeResponse):
         return
     if not any(trigger):
@@ -152,7 +153,7 @@ async def _print_freeze_frame(v: Vehicle, imperial: bool) -> None:
         if not info:
             continue
         try:
-            data = next(iter((await v.freeze_frame_pid(pid)).values()))
+            data = primary(await v.freeze_frame_pid(pid))
         except (NoData, NegativeResponse):
             continue
         print(f"  {info.name:<38} {format_value(info.decode(data), info.unit, imperial)}")
@@ -203,7 +204,7 @@ async def cmd_probe(args) -> None:
     async with session(args) as v:
         header = args.header
         if header == "auto":
-            header = FORD_PWM_PCM_HEADER if v.elm.protocol == "1" else None
+            header = {"1": FORD_PWM_PCM_HEADER, "6": CAN_ENGINE_HEADER, "8": CAN_ENGINE_HEADER}.get(v.elm.protocol)
         if header:
             await v.elm.command(f"ATSH{header}")
             status(f"Using header {header}")
@@ -212,11 +213,13 @@ async def cmd_probe(args) -> None:
         for did in range(start, end + 1):
             try:
                 for ecu, data in (await v.enhanced(did)).items():
-                    print(f"{did:04X}  ECU {ecu}  {data.hex(' ').upper()}")
+                    print(f"{did:04X}  ECU {ecu_name(ecu)}  {data.hex(' ').upper()}")
                     found += 1
             except NoData:
                 pass
             except NegativeResponse as e:
+                if e.code == 0x11:
+                    raise ElmError(f"{e}; this ECU doesn't accept mode 22 with this header") from None
                 if e.code != 0x31:  # "out of range" just means unsupported
                     print(f"{did:04X}  {e}")
         status(f"\n{found} DID(s) responded.")
@@ -230,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--name", help="match adapter by (partial) BLE name instead of auto-detect")
     parser.add_argument(
         "--protocol", default="0",
-        help="ELM327 protocol number: 0 = auto (default), 1 = J1850 PWM (2001 Ford), 6 = CAN 11-bit 500k",
+        help="ELM327 protocol number: 0 = auto (default), 1 = J1850 PWM (2001 Ford), 6 = CAN 11-bit 500k (2019 RAV4)",
     )
     parser.add_argument("--metric", dest="imperial", action="store_false", help="show metric units")
     parser.add_argument("--log", metavar="FILE", help="append every raw command/response to FILE")
@@ -250,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--csv", metavar="FILE", help="also write samples to a CSV file")
     p.set_defaults(func=cmd_live)
 
-    sub.add_parser("dtc", help="stored and pending trouble codes, plus freeze frame").set_defaults(func=cmd_dtc)
+    sub.add_parser("dtc", help="stored, pending and permanent trouble codes, plus freeze frame").set_defaults(func=cmd_dtc)
 
     p = sub.add_parser("clear-dtc", help="clear trouble codes (resets readiness monitors)")
     p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
@@ -266,7 +269,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("end", help="last DID, hex (e.g. 11FF)")
     p.add_argument(
         "--header", default="auto",
-        help=f"ATSH header to use; 'auto' = {FORD_PWM_PCM_HEADER} (Ford PCM) on J1850 PWM, 'none' to leave default",
+        help=(
+            f"ATSH header to use; 'auto' = {FORD_PWM_PCM_HEADER} (Ford PCM) on J1850 PWM, "
+            f"{CAN_ENGINE_HEADER} (engine ECU) on 11-bit CAN; 'none' to leave default"
+        ),
     )
     p.set_defaults(func=cmd_probe)
     return parser

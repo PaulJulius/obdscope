@@ -1,7 +1,9 @@
 """OBD-II services on top of the ELM327 layer.
 
 Every read method returns results keyed by the responding ECU. On a 2001
-Expedition that is normally just the PCM (address ``10`` on J1850 PWM).
+Expedition that is normally just the PCM (address ``10`` on J1850 PWM). CAN
+vehicles such as a 2019 RAV4 often answer from several ECUs at once, e.g. the
+engine (``7E8``) and transmission (``7E9``).
 """
 
 from __future__ import annotations
@@ -19,6 +21,29 @@ NRC_NAMES = {
     0x33: "security access denied",
     0x78: "response pending",
 }
+
+
+# Legacy protocols report a 1-byte source address; 11-bit CAN reports the response ID.
+ECU_NAMES = {
+    "10": "PCM",
+    "7E8": "engine",
+    "7E9": "transmission",
+    "7EA": "hybrid/EV system",
+}
+# The engine ECU answers the most, so prefer it when a caller wants one value.
+_PRIMARY_ECUS = ("7E8", "10")
+
+
+def ecu_name(ecu: str) -> str:
+    return f"{ecu} ({ECU_NAMES[ecu]})" if ecu in ECU_NAMES else ecu
+
+
+def primary(per_ecu: dict[str, bytes]) -> bytes:
+    """Pick the engine ECU's answer when several ECUs responded."""
+    for ecu in _PRIMARY_ECUS:
+        if ecu in per_ecu:
+            return per_ecu[ecu]
+    return per_ecu[min(per_ecu)]
 
 
 class NegativeResponse(ElmError):
@@ -92,10 +117,10 @@ class Vehicle:
             base += 0x20
         return supported
 
-    # --- Modes 03 / 07 / 04: trouble codes ---
+    # --- Modes 03 / 07 / 0A / 04: trouble codes ---
 
     async def dtcs(self, mode: int = 0x03) -> dict[str, list[str]]:
-        """Stored (mode 03) or pending (mode 07) codes."""
+        """Stored (03), pending (07) or permanent (0A, MY2010+) codes. Empty dict if nothing answered."""
         try:
             responses = await self.service(bytes([mode]))
         except NoData:
