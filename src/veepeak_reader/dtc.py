@@ -32,6 +32,7 @@ DESCRIPTIONS = {
     "P0443": "Evaporative emission purge control valve circuit",
     "P0446": "Evaporative emission vent control circuit",
     "P0455": "Evaporative emission system large leak",
+    "P0456": "Evaporative emission system very small leak",
     "P0500": "Vehicle speed sensor malfunction",
     "P0505": "Idle air control system malfunction",
     "P0603": "PCM keep-alive memory test error",

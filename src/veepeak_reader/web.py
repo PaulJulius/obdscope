@@ -19,15 +19,19 @@ from pathlib import Path
 from aiohttp import web
 
 from . import reports
-from .elm327 import Elm327, ElmError, NoData
+from .elm327 import Elm327, ElmError, NoData, Transport
 from .obd import NegativeResponse, Vehicle, primary
 from .pids import DEFAULT_LIVE, PIDS, convert, display, parse_pid
-from .transport import BleTransport, TransportError
+from .simulator import PROFILES
+from .transport import TransportError, make_transport
 
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 RECORDINGS = Path("recordings")
+SOURCES = [{"id": "ble", "label": "OBDCheck BLE adapter"}] + [
+    {"id": key, "label": f"Simulated {profile.label}"} for key, profile in PROFILES.items()
+]
 VOLTAGE_EVERY = 10.0  # seconds between battery voltage refreshes
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 
@@ -43,7 +47,7 @@ class Dashboard:
         self.interval = 1.0
         self.state = "disconnected"  # disconnected | connecting | connected | error
         self.message = ""
-        self.transport: BleTransport | None = None
+        self.transport: Transport | None = None
         self.vehicle: Vehicle | None = None
         self.summary: dict | None = None
         self.voltage: str | None = None
@@ -54,6 +58,7 @@ class Dashboard:
         self.poller: asyncio.Task | None = None
         self.recording: tuple[Path, object, csv.writer] | None = None
         self._recorded: list[int] = []
+        self.source = args.simulate or "ble"  # what the Connect button uses by default
 
     # --- Event stream ---
 
@@ -89,6 +94,8 @@ class Dashboard:
             "imperial": self.imperial,
             "interval": self.interval,
             "recording": str(self.recording[0]) if self.recording else None,
+            "sources": SOURCES,
+            "source": self.source,
         }
 
     def _set_state(self, state: str, message: str = "") -> None:
@@ -97,11 +104,13 @@ class Dashboard:
 
     # --- Connection lifecycle ---
 
-    async def connect(self) -> None:
+    async def connect(self, source: str | None = None) -> None:
         if self.state in ("connecting", "connected"):
             return
-        self._set_state("connecting", "Searching for adapter…")
-        transport = BleTransport(address=self.args.address, name=self.args.name)
+        self.source = source or self.source
+        simulate = None if self.source == "ble" else self.source
+        self._set_state("connecting", "Starting simulator…" if simulate else "Searching for adapter…")
+        transport = make_transport(simulate, address=self.args.address, name=self.args.name)
         try:
             await transport.connect()
             self._set_state("connecting", f"Connected to {transport.device.name or 'adapter'}. Talking to vehicle…")
@@ -122,6 +131,7 @@ class Dashboard:
             "adapter": elm.version,
             "protocol": elm.protocol,
             "protocol_name": elm.protocol_name,
+            "simulated": bool(simulate),
         }
         self.gauges = [p for p in map(parse_pid, DEFAULT_LIVE) if p in supported and p in PIDS]
         self.poller = asyncio.create_task(self._poll())
@@ -287,7 +297,10 @@ async def events(request):
 
 
 async def connect(request):
-    asyncio.create_task(_dashboard(request).connect())
+    source = (await request.json()).get("source")
+    if source is not None and source not in {s["id"] for s in SOURCES}:
+        raise ValueError(f"unknown source {source!r}")
+    asyncio.create_task(_dashboard(request).connect(source))
     return web.json_response({"ok": True}, status=202)
 
 

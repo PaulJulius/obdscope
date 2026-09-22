@@ -8,6 +8,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from veepeak_reader import web
+from veepeak_reader.transport import make_transport
 
 from fakes import CAN_INIT, FakeBleTransport
 
@@ -32,13 +33,14 @@ RESPONSES = {
 async def client(monkeypatch, tmp_path):
     transports = []
 
-    def make_transport(**_kwargs):
-        transports.append(FakeBleTransport(RESPONSES))
+    def fake_or_simulated(simulate, **kwargs):
+        # The "BLE adapter" is a scripted fake; simulated vehicles are the real simulator.
+        transports.append(make_transport(simulate, **kwargs) if simulate else FakeBleTransport(RESPONSES))
         return transports[-1]
 
-    monkeypatch.setattr(web, "BleTransport", make_transport)
+    monkeypatch.setattr(web, "make_transport", fake_or_simulated)
     monkeypatch.setattr(web, "RECORDINGS", tmp_path / "recordings")
-    args = SimpleNamespace(address=None, name=None, protocol="0", imperial=True, host="127.0.0.1")
+    args = SimpleNamespace(address=None, name=None, protocol="0", imperial=True, host="127.0.0.1", simulate=None)
     app = web.build_app(args)
     async with TestClient(TestServer(app)) as c:
         c.dashboard = app[web.DASHBOARD]
@@ -46,8 +48,8 @@ async def client(monkeypatch, tmp_path):
         yield c
 
 
-async def connect(client) -> None:
-    resp = await client.post("/api/connect", json={})
+async def connect(client, source: str | None = None) -> None:
+    resp = await client.post("/api/connect", json={"source": source} if source else {})
     assert resp.status == 202
     for _ in range(100):
         if client.dashboard.state == "connected":
@@ -141,7 +143,7 @@ async def test_disconnect_closes_transport(client):
 
 async def test_serve_starts_and_shuts_down(capsys):
     args = SimpleNamespace(
-        address=None, name=None, protocol="0", imperial=True, host="127.0.0.1", port=0, no_browser=True,
+        address=None, name=None, protocol="0", imperial=True, host="127.0.0.1", port=0, no_browser=True, simulate=None,
     )
     task = asyncio.create_task(web.serve(args))
     await asyncio.sleep(0.2)
@@ -150,3 +152,27 @@ async def test_serve_starts_and_shuts_down(capsys):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert "veepeak UI running at http://localhost:0/" in capsys.readouterr().out
+
+
+async def test_connect_to_simulated_vehicles(client):
+    state = client.dashboard.state_event()
+    assert [s["id"] for s in state["sources"]] == ["ble", "rav4", "expedition"]
+    assert state["source"] == "ble"
+
+    await connect(client, "expedition")
+    d = client.dashboard
+    assert d.summary["simulated"] and d.summary["protocol"] == "1"
+    assert d.summary["device"] == "Simulated 2001 Ford Expedition XLT"
+    report = await (await client.get("/api/dtc")).json()
+    assert [c["code"] for c in report["stored"]] == ["P0171", "P0174"]
+    assert report["freeze_frame"]["trigger"] == "P0171"
+
+    await client.post("/api/disconnect", json={})
+    await connect(client, "rav4")
+    assert client.dashboard.summary["protocol"] == "6"
+    assert client.dashboard.source == "rav4"
+
+
+async def test_rejects_unknown_source(client):
+    resp = await client.post("/api/connect", json={"source": "delorean"})
+    assert resp.status == 400

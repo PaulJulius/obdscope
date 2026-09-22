@@ -17,6 +17,37 @@ Bluetooth permission: System Settings → Privacy & Security → Bluetooth.
 You don't pair the adapter in System Settings. BLE adapters connect directly
 from the app.
 
+## Simulated vehicles
+
+Add `--simulate rav4` or `--simulate expedition` to any command to use a
+simulated vehicle instead of the adapter. You don't need the adapter,
+Bluetooth, or the car:
+
+```sh
+uv run veepeak ui --simulate expedition     # or pick a vehicle next to Connect
+uv run veepeak live --simulate rav4
+uv run veepeak dtc --simulate expedition
+uv run veepeak raw --simulate rav4          # type ATZ, 010C, 0902...
+```
+
+The simulator answers the same ELM327 commands as the real adapter, using
+the same J1850 or CAN framing, so the parser, CLI and UI all run the code
+they run against a real car. The vehicle repeats a two-minute drive: about
+20 seconds of idle, city speed, highway, then slowing to a stop. It starts
+cold, so coolant climbs and the fuel system switches from open to closed
+loop.
+
+| | 2001 Expedition XLT (`expedition`) | 2019 RAV4 Adventure (`rav4`) |
+| --- | --- | --- |
+| Protocol | J1850 PWM, one PCM (`10`) | CAN 11-bit, engine `7E8` + transmission `7E9` |
+| Check engine light | On: P0171, P0174 (lean, both banks) | Off. Pending P0456 (tiny evap leak) |
+| What to notice | Long-term fuel trims around +14% at idle, near +3% at speed: a vacuum-leak pattern. Clear the codes and P0171 returns as pending about a minute later. | VIN, permanent codes, wideband O2 (`Wideband O2 B1S1 lambda`), catalyst temperature |
+| `probe` finds | a few DIDs in `1100`–`11FF` | DIDs in `1000`–`10FF` (engine), `--header 7E1` for transmission |
+
+The mode 22 identifiers are made up so that `probe` has something to find.
+They don't match real Ford or Toyota identifiers. The simulated VIN
+(`2T3SIMRAV4KW00001`) is also made up.
+
 ## Web dashboard
 
 ```sh
@@ -57,7 +88,7 @@ uv run veepeak raw ATRV 010C        # one-shot raw commands
 uv run veepeak probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
 ```
 
-Global options go **before** the command:
+Global options can go before or after the command:
 
 | Option | Purpose |
 | --- | --- |
@@ -65,6 +96,7 @@ Global options go **before** the command:
 | `--protocol N` | skip auto-detect: `1` for the Expedition (J1850 PWM), `6` for the RAV4 (CAN) |
 | `--metric` | metric units (default is °F / mph / psi) |
 | `--log FILE` | record every raw command and response, useful for figuring out odd behaviour |
+| `--simulate rav4\|expedition` | use a simulated vehicle instead of the adapter (see below) |
 
 `live` accepts aliases (`rpm speed coolant load throttle stft1 ltft1 stft2 ltft2
 map iat maf timing o2b1s1 o2b1s2 o2b2s1 o2b2s2 fuel baro cat1 ambient pedal
@@ -120,8 +152,8 @@ support are skipped, so e.g. the bank 2 trims drop out on the RAV4's 4-cylinder.
 uv run pytest
 ```
 
-Tests use a scripted fake adapter (`tests/test_obd.py`), so no hardware is
-needed. Code layout:
+Tests use scripted fake adapters (`tests/fakes.py`) and the simulator, so no
+hardware is needed. Code layout:
 
 - `transport.py`: BLE connection and GATT notify/write handling
 - `elm327.py`: AT commands, error handling, J1850/CAN frame parsing
@@ -130,3 +162,4 @@ needed. Code layout:
 - `reports.py`: multi-request reports (vehicle info, all sensors, trouble codes) shared by CLI and UI
 - `cli.py`: the `veepeak` command
 - `web.py` and `static/index.html`: the `veepeak ui` server and single-page dashboard
+- `simulator.py`: simulated adapter and vehicles (`--simulate`)

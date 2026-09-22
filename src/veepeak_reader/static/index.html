@@ -35,6 +35,8 @@
   .pill.connected::before { background: var(--ok); }
   .pill.connecting::before { background: var(--warn); animation: pulse 1s infinite alternate; }
   .pill.error::before { background: var(--bad); }
+  .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+           color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 1px 8px; }
   @keyframes pulse { to { opacity: .3; } }
   #message { flex-basis: 100%; font-size: 13px; color: var(--muted); }
   #message:empty { display: none; }
@@ -81,8 +83,10 @@
 <header>
   <h1>veepeak</h1>
   <span id="pill" class="pill">Disconnected</span>
+  <span id="sim-badge" class="badge hidden" title="Data comes from a simulated vehicle, not the adapter">Simulated</span>
   <span id="vehicle"></span>
   <button id="units" title="Switch units">°F</button>
+  <select id="source" aria-label="Data source"></select>
   <button id="connect" class="primary">Connect</button>
   <div id="message"></div>
 </header>
@@ -189,7 +193,14 @@ function applyState(next) {
   $("#message").textContent = state.message;
   $("#message").className = state.state === "error" ? "error" : "";
   const v = state.vehicle;
-  $("#vehicle").textContent = v ? `${v.protocol_name} · ${state.voltage ?? ""}` : "";
+  $("#vehicle").textContent = v ? `${v.device} · ${v.protocol_name} · ${state.voltage ?? ""}` : "";
+  $("#sim-badge").classList.toggle("hidden", !v?.simulated);
+
+  const source = $("#source");
+  source.innerHTML = state.sources.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join("");
+  source.value = source.dataset.chosen || state.source;
+  source.classList.toggle("hidden", connected);
+  source.disabled = state.state === "connecting";
 
   const connectBtn = $("#connect");
   connectBtn.textContent = connected ? "Disconnect" : "Connect";
@@ -217,7 +228,8 @@ function applyState(next) {
   if (gaugesChanged || unitsChanged) renderGauges();
   $("#gauges-empty").classList.toggle("hidden", state.gauges.length > 0);
   $("#gauges-empty").textContent = connected ? "No gauges. Add one above." :
-    "Plug in the adapter, turn the ignition on, and press Connect.";
+    state.source === "ble" ? "Plug in the adapter, turn the ignition on, and press Connect." :
+    "Press Connect to start the simulated vehicle.";
   document.querySelectorAll(".gauge .remove").forEach((b) => b.classList.toggle("hidden", recording));
 }
 
@@ -264,7 +276,8 @@ function updateGauge(pid, value) {
 // --- Dashboard controls ---
 
 $("#connect").onclick = () => busy($("#connect"), "…", () =>
-  api(state.state === "connected" ? "/api/disconnect" : "/api/connect", {}));
+  state.state === "connected" ? api("/api/disconnect", {}) : api("/api/connect", {source: $("#source").value}));
+$("#source").onchange = (e) => { e.target.dataset.chosen = e.target.value; applyState(state); };
 $("#units").onclick = () => api("/api/settings", {imperial: !state.imperial}).catch((e) => toast(e.message));
 $("#interval").onchange = (e) => api("/api/settings", {interval: Number(e.target.value)}).catch((err) => toast(err.message));
 $("#add-gauge").onchange = (e) => {
@@ -328,7 +341,7 @@ $("#clear-codes").onclick = () => {
 $("#read-info").onclick = () => busy($("#read-info"), "Reading…", async () => {
   const r = await api("/api/info");
   const rows = [
-    ["VIN", r.vin ? `<span class="code">${esc(r.vin)}</span>` : '<span class="note">Not reported (common before 2005)</span>'],
+    ["VIN", r.vin ? `<span class="code">${esc(r.vin)}</span>` : '<span class="note">Not reported (common before MY2005)</span>'],
     ["OBD standard", esc(r.obd_standard ?? "–")],
     ["Protocol", esc(`${r.protocol} · ${r.protocol_name}`)],
     ["Adapter", esc(r.adapter)],

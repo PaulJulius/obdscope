@@ -12,9 +12,10 @@ from contextlib import asynccontextmanager
 
 from . import reports
 from .elm327 import Elm327, ElmError, NoData
-from .obd import NegativeResponse, Vehicle, primary
+from .obd import NegativeResponse, Vehicle, ecu_name, primary
 from .pids import DEFAULT_LIVE, PIDS, format_value, parse_pid
-from .transport import BleTransport, TransportError, discover
+from .simulator import PROFILES
+from .transport import TransportError, discover, make_transport
 
 FORD_PWM_PCM_HEADER = "C410F1"  # priority C4, target PCM (10), tester (F1)
 CAN_ENGINE_HEADER = "7E0"  # physical request ID of the engine ECU (answers on 7E8)
@@ -26,8 +27,8 @@ def status(message: str) -> None:
 
 @asynccontextmanager
 async def session(args):
-    transport = BleTransport(address=args.address, name=args.name)
-    status("Connecting to adapter...")
+    transport = make_transport(args.simulate, address=args.address, name=args.name)
+    status(f"Connecting to {'simulated ' + PROFILES[args.simulate].label if args.simulate else 'adapter'}...")
     await transport.connect()
     try:
         status(f"Connected to {transport.device.name or 'adapter'} ({transport.device.address}). Initializing...")
@@ -42,6 +43,9 @@ async def session(args):
 # --- Commands ---
 
 async def cmd_scan(args) -> None:
+    if args.simulate:
+        status("Simulated vehicles don't need scanning; run any other command with --simulate.")
+        return
     status(f"Scanning for {args.timeout:.0f}s...")
     for d in await discover(args.timeout):
         marker = "*" if d.likely_obd else " "
@@ -125,7 +129,7 @@ async def cmd_dtc(args) -> None:
         elif not codes:
             print("  none")
         for c in codes or []:
-            print(f"  {c['code']}  {c['description']}  (ECU {c['ecu']})")
+            print(f"  {c['code']}  {c['description'] or '(no description)'}  [ECU {c['ecu']}]")
     if ff := report["freeze_frame"]:
         print(f"\nFreeze frame (captured when {ff['trigger']} set):")
         for r in ff["readings"]:
@@ -206,44 +210,65 @@ async def cmd_ui(args) -> None:
 
 # --- Entry point ---
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="veepeak", description="Read OBD-II data via a Veepeak OBDCheck BLE adapter.")
-    parser.add_argument("--address", help="BLE address/UUID of the adapter (see `veepeak scan`)")
-    parser.add_argument("--name", help="match adapter by (partial) BLE name instead of auto-detect")
+def _add_global_options(parser: argparse.ArgumentParser, with_defaults: bool) -> None:
+    """Global options, accepted before or after the command name.
+
+    Subcommands get copies whose defaults are SUPPRESS, so an option given
+    before the command isn't overwritten by the subcommand's default.
+    """
+    default = (lambda value: value) if with_defaults else (lambda value: argparse.SUPPRESS)
+    parser.add_argument("--address", default=default(None), help="BLE address/UUID of the adapter (see `veepeak scan`)")
+    parser.add_argument("--name", default=default(None), help="match adapter by (partial) BLE name instead of auto-detect")
     parser.add_argument(
-        "--protocol", default="0",
+        "--simulate", choices=sorted(PROFILES), default=default(None),
+        help="use a simulated vehicle instead of the adapter: " + ", ".join(
+            f"{key} = {profile.label}" for key, profile in sorted(PROFILES.items())
+        ),
+    )
+    parser.add_argument(
+        "--protocol", default=default("0"),
         help="ELM327 protocol number: 0 = auto (default), 1 = J1850 PWM (2001 Ford), 6 = CAN 11-bit 500k (2019 RAV4)",
     )
-    parser.add_argument("--metric", dest="imperial", action="store_false", help="show metric units")
-    parser.add_argument("--log", metavar="FILE", help="append every raw command/response to FILE")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--metric", dest="imperial", action="store_false", default=default(True), help="show metric units")
+    parser.add_argument("--log", metavar="FILE", default=default(None), help="append every raw command/response to FILE")
 
-    p = sub.add_parser("scan", help="list nearby BLE devices")
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="veepeak", description="Read OBD-II data via a Veepeak OBDCheck BLE adapter.")
+    _add_global_options(parser, with_defaults=True)
+    common = argparse.ArgumentParser(add_help=False)
+    _add_global_options(common, with_defaults=False)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    def add(name: str, **kwargs) -> argparse.ArgumentParser:
+        return subparsers.add_parser(name, parents=[common], **kwargs)
+
+    p = add("scan", help="list nearby BLE devices")
     p.add_argument("--timeout", type=float, default=8.0)
     p.set_defaults(func=cmd_scan)
 
-    sub.add_parser("info", help="adapter, protocol, VIN, MIL and readiness monitors").set_defaults(func=cmd_info)
-    sub.add_parser("pids", help="read every supported mode 01 PID once").set_defaults(func=cmd_pids)
+    add("info", help="adapter, protocol, VIN, MIL and readiness monitors").set_defaults(func=cmd_info)
+    add("pids", help="read every supported mode 01 PID once").set_defaults(func=cmd_pids)
 
-    p = sub.add_parser("live", help="poll PIDs continuously")
+    p = add("live", help="poll PIDs continuously")
     p.add_argument("pids", nargs="*", help=f"aliases or hex PIDs (default: {' '.join(DEFAULT_LIVE)})")
     p.add_argument("--interval", type=float, default=1.0, help="seconds between samples")
     p.add_argument("--count", type=int, help="stop after N samples")
     p.add_argument("--csv", metavar="FILE", help="also write samples to a CSV file")
     p.set_defaults(func=cmd_live)
 
-    sub.add_parser("dtc", help="stored, pending and permanent trouble codes, plus freeze frame").set_defaults(func=cmd_dtc)
+    add("dtc", help="stored, pending and permanent trouble codes, plus freeze frame").set_defaults(func=cmd_dtc)
 
-    p = sub.add_parser("clear-dtc", help="clear trouble codes (resets readiness monitors)")
+    p = add("clear-dtc", help="clear trouble codes (resets readiness monitors)")
     p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     p.set_defaults(func=cmd_clear)
 
-    p = sub.add_parser("raw", help="send raw ELM327 commands (interactive if none given)")
+    p = add("raw", help="send raw ELM327 commands (interactive if none given)")
     p.add_argument("commands", nargs="*")
     p.add_argument("--timeout", type=float, default=5.0)
     p.set_defaults(func=cmd_raw)
 
-    p = sub.add_parser("probe", help="sweep a range of manufacturer (mode 22) data identifiers")
+    p = add("probe", help="sweep a range of manufacturer (mode 22) data identifiers")
     p.add_argument("start", help="first DID, hex (e.g. 1100)")
     p.add_argument("end", help="last DID, hex (e.g. 11FF)")
     p.add_argument(
@@ -255,7 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_probe)
 
-    p = sub.add_parser("ui", help="open the web dashboard in your browser")
+    p = add("ui", help="open the web dashboard in your browser")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument(
         "--host", default="127.0.0.1",

@@ -26,6 +26,15 @@ class TransportError(Exception):
     pass
 
 
+def make_transport(simulate: str | None = None, address: str | None = None, name: str | None = None):
+    """The real BLE adapter, or a simulated vehicle when ``simulate`` names a profile."""
+    if simulate:
+        from .simulator import SimulatedTransport
+
+        return SimulatedTransport(simulate)
+    return BleTransport(address=address, name=name)
+
+
 @dataclass
 class FoundDevice:
     device: BLEDevice
