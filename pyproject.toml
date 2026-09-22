@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Read OBD-II data from a Veepeak OBDCheck BLE (ELM327) adapter"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["bleak>=0.22"]
+dependencies = [
+    "aiohttp>=3.14.3",
+    "bleak>=0.22",
+]
 
 [project.scripts]
 veepeak = "veepeak_reader.cli:main"

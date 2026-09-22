@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>veepeak</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #16181d; --muted: #5d6470; --border: #dde1e6;
+    --accent: #1f6feb; --accent-text: #ffffff; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #181b21; --text: #e8eaed; --muted: #9aa3ae; --border: #2b3038;
+      --accent: #4c8dff; --accent-text: #0f1115; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  button, select { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 6px 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  select { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; margin: 0; }
+  #vehicle { color: var(--muted); font-size: 13px; margin-right: auto; min-width: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+  .pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .pill.connected::before { background: var(--ok); }
+  .pill.connecting::before { background: var(--warn); animation: pulse 1s infinite alternate; }
+  .pill.error::before { background: var(--bad); }
+  @keyframes pulse { to { opacity: .3; } }
+  #message { flex-basis: 100%; font-size: 13px; color: var(--muted); }
+  #message:empty { display: none; }
+  #message.error { color: var(--bad); }
+
+  nav { display: flex; gap: 4px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+  nav button { border: 0; border-radius: 0; background: none; padding: 10px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .toolbar .spacer { flex: 1; }
+  .rec::before { content: "●"; color: var(--bad); margin-right: 6px; }
+  .rec.on { border-color: var(--bad); }
+  .note { color: var(--muted); font-size: 13px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 12px; }
+  .gauge { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px 8px; position: relative; min-width: 0; }
+  .gauge .name { color: var(--muted); font-size: 13px; line-height: 1.3; padding-right: 22px; min-height: 2.6em;
+                 display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .gauge .value { font-size: clamp(26px, 8vw, 34px); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; min-height: 41px; }
+  .gauge .value.text { font-size: 16px; font-weight: 600; min-height: 41px; }
+  .gauge .unit { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .gauge svg { display: block; width: 100%; height: 34px; }
+  .gauge svg polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .gauge .remove { position: absolute; top: 6px; right: 6px; border: 0; background: none; color: var(--muted); padding: 2px 6px; font-size: 16px; line-height: 1; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; overflow-x: auto; }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; width: 40%; }
+  tr:last-child td, tr:last-child th { border-bottom: 0; }
+  .code { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+
+  #toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 32px);
+           background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>veepeak</h1>
+  <span id="pill" class="pill">Disconnected</span>
+  <span id="vehicle"></span>
+  <button id="units" title="Switch units">°F</button>
+  <button id="connect" class="primary">Connect</button>
+  <div id="message"></div>
+</header>
+<nav>
+  <button data-tab="dashboard" class="active">Dashboard</button>
+  <button data-tab="codes">Trouble codes</button>
+  <button data-tab="vehicle">Vehicle</button>
+</nav>
+<main>
+  <section id="tab-dashboard">
+    <div class="toolbar">
+      <select id="add-gauge"><option value="">+ Add gauge…</option></select>
+      <label class="note">Every <select id="interval">
+        <option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option><option value="5">5 s</option>
+      </select></label>
+      <span class="spacer"></span>
+      <span id="rec-path" class="note"></span>
+      <button id="record" class="rec">Record</button>
+    </div>
+    <div id="gauges" class="grid"></div>
+    <p id="gauges-empty" class="empty">Plug in the adapter, turn the ignition on, and press Connect.</p>
+  </section>
+
+  <section id="tab-codes" class="hidden">
+    <div class="toolbar">
+      <button id="read-codes" class="primary needs-connection">Read codes</button>
+      <span class="spacer"></span>
+      <button id="clear-codes" class="danger needs-connection">Clear codes…</button>
+    </div>
+    <div id="codes"><p class="empty">Press “Read codes” to check for trouble codes.</p></div>
+  </section>
+
+  <section id="tab-vehicle" class="hidden">
+    <div class="toolbar">
+      <button id="read-info" class="primary needs-connection">Read vehicle info</button>
+      <button id="read-all" class="needs-connection">Read all sensors</button>
+    </div>
+    <div id="info"><p class="empty">Read the VIN, readiness monitors, and every sensor the vehicle supports.</p></div>
+  </section>
+</main>
+<div id="toast" class="hidden"></div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const HISTORY = 90;
+let state = null;
+let sparkData = {};  // pid -> recent numeric values for sparklines
+let latest = {};   // pid -> last sample value
+const busyButtons = new Set();
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const hex = (pid) => pid.toString(16).toUpperCase().padStart(2, "0");
+
+function toast(text) {
+  const el = $("#toast");
+  el.textContent = text;
+  el.classList.remove("hidden");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.add("hidden"), 5000);
+}
+
+async function api(path, body) {
+  const options = body === undefined ? {} :
+    {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+// Run an action with its button disabled; report failures as a toast.
+async function busy(button, label, fn) {
+  const original = button.textContent;
+  busyButtons.add(button);
+  button.disabled = true;
+  button.textContent = label;
+  try { await fn(); } catch (e) { toast(e.message); }
+  finally { busyButtons.delete(button); button.textContent = original; applyState(state); }
+}
+
+// --- Live state ---
+
+const events = new EventSource("/api/events");
+events.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+  if (event.type === "state") applyState(event);
+  else if (event.type === "sample") applySample(event);
+};
+events.onerror = () => {
+  $("#pill").className = "pill error";
+  $("#pill").textContent = "UI server stopped";
+};
+
+function applyState(next) {
+  if (!next) return;
+  const unitsChanged = state && state.imperial !== next.imperial;
+  const gaugesChanged = !state || state.gauges.join() !== next.gauges.join();
+  state = next;
+  const connected = state.state === "connected";
+
+  const labels = {connected: "Connected", connecting: "Connecting…", disconnected: "Disconnected", error: "Error"};
+  $("#pill").className = `pill ${state.state}`;
+  $("#pill").textContent = labels[state.state];
+  $("#message").textContent = state.message;
+  $("#message").className = state.state === "error" ? "error" : "";
+  const v = state.vehicle;
+  $("#vehicle").textContent = v ? `${v.protocol_name} · ${state.voltage ?? ""}` : "";
+
+  const connectBtn = $("#connect");
+  connectBtn.textContent = connected ? "Disconnect" : "Connect";
+  connectBtn.className = connected ? "" : "primary";
+  connectBtn.disabled = state.state === "connecting" || busyButtons.has(connectBtn);
+  $("#units").textContent = state.imperial ? "°F" : "°C";
+
+  document.querySelectorAll(".needs-connection").forEach((b) => { b.disabled = !connected || busyButtons.has(b); });
+  $("#interval").value = String(state.interval);
+  $("#interval").disabled = !connected;
+
+  const recording = Boolean(state.recording);
+  $("#record").textContent = recording ? "Stop recording" : "Record";
+  $("#record").classList.toggle("on", recording);
+  $("#record").disabled = !connected;
+  $("#rec-path").textContent = recording ? `→ ${state.recording}` : "";
+
+  const add = $("#add-gauge");
+  add.disabled = !connected || recording;
+  add.innerHTML = '<option value="">+ Add gauge…</option>' + state.available
+    .filter((p) => !state.gauges.includes(p.pid))
+    .map((p) => `<option value="${p.pid}">${esc(p.name)}${p.unit ? ` (${esc(p.unit)})` : ""}</option>`).join("");
+
+  if (unitsChanged) sparkData = {};
+  if (gaugesChanged || unitsChanged) renderGauges();
+  $("#gauges-empty").classList.toggle("hidden", state.gauges.length > 0);
+  $("#gauges-empty").textContent = connected ? "No gauges. Add one above." :
+    "Plug in the adapter, turn the ignition on, and press Connect.";
+  document.querySelectorAll(".gauge .remove").forEach((b) => b.classList.toggle("hidden", recording));
+}
+
+function renderGauges() {
+  const byPid = Object.fromEntries(state.available.map((p) => [p.pid, p]));
+  $("#gauges").innerHTML = state.gauges.map((pid) => `
+    <div class="gauge" id="g-${pid}">
+      <div class="name" title="PID ${hex(pid)}">${esc(byPid[pid]?.name ?? `PID ${hex(pid)}`)}</div>
+      <div class="value">–</div>
+      <svg viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points=""/></svg>
+      <button class="remove" data-pid="${pid}" title="Remove gauge" aria-label="Remove gauge">×</button>
+    </div>`).join("");
+  state.gauges.forEach((pid) => { if (latest[pid] !== undefined) updateGauge(pid, latest[pid]); });
+}
+
+function applySample(sample) {
+  for (const [key, value] of Object.entries(sample.values)) {
+    const pid = Number(key);
+    latest[pid] = value;
+    if (value && value.num !== null) {
+      const h = (sparkData[pid] ??= []);
+      h.push(value.num);
+      if (h.length > HISTORY) h.shift();
+    }
+    updateGauge(pid, value);
+  }
+}
+
+function updateGauge(pid, value) {
+  const card = document.getElementById(`g-${pid}`);
+  if (!card) return;
+  const el = card.querySelector(".value");
+  if (!value) { el.textContent = "–"; return; }
+  el.classList.toggle("text", value.num === null);
+  el.innerHTML = `${esc(value.text)}${value.unit ? `<span class="unit">${esc(value.unit)}</span>` : ""}`;
+  const h = sparkData[pid] || [];
+  if (h.length > 1) {
+    const min = Math.min(...h), max = Math.max(...h), span = max - min;
+    const points = h.map((y, i) => `${(i / (HISTORY - 1)) * 100},${span ? 28 - ((y - min) / span) * 26 : 15}`).join(" ");
+    card.querySelector("polyline").setAttribute("points", points);
+  }
+}
+
+// --- Dashboard controls ---
+
+$("#connect").onclick = () => busy($("#connect"), "…", () =>
+  api(state.state === "connected" ? "/api/disconnect" : "/api/connect", {}));
+$("#units").onclick = () => api("/api/settings", {imperial: !state.imperial}).catch((e) => toast(e.message));
+$("#interval").onchange = (e) => api("/api/settings", {interval: Number(e.target.value)}).catch((err) => toast(err.message));
+$("#add-gauge").onchange = (e) => {
+  const pid = Number(e.target.value);
+  if (e.target.value) api("/api/gauges", {pids: [...state.gauges, pid]}).catch((err) => toast(err.message));
+};
+$("#gauges").onclick = (e) => {
+  const pid = Number(e.target.dataset.pid);
+  if (e.target.matches(".remove")) api("/api/gauges", {pids: state.gauges.filter((p) => p !== pid)}).catch((err) => toast(err.message));
+};
+$("#record").onclick = async () => {
+  try {
+    const r = await api("/api/record", {on: !state.recording});
+    if (!r.recording) toast("Recording saved.");
+  } catch (e) { toast(e.message); }
+};
+
+// --- Tabs ---
+
+document.querySelectorAll("nav button").forEach((btn) => btn.onclick = () => {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll("main > section").forEach((s) => s.classList.toggle("hidden", s.id !== `tab-${btn.dataset.tab}`));
+});
+
+// --- Trouble codes ---
+
+function codeList(codes, noneText) {
+  if (codes === null) return `<p class="note">${noneText}</p>`;
+  if (!codes.length) return '<p class="ok">None</p>';
+  return `<table>${codes.map((c) => `<tr><td class="code">${esc(c.code)}</td><td>${esc(c.description) || '<span class="note">No description; look this code up</span>'}</td><td class="note">${esc(c.ecu)}</td></tr>`).join("")}</table>`;
+}
+
+async function readCodes() {
+  const r = await api("/api/dtc");
+  let html = `
+    <div class="card"><h2>Stored codes</h2>${codeList(r.stored)}</div>
+    <div class="card"><h2>Pending codes</h2>${codeList(r.pending)}</div>
+    <div class="card"><h2>Permanent codes</h2>${codeList(r.permanent, "Not supported. Permanent codes exist on 2010 and newer vehicles.")}</div>`;
+  if (r.freeze_frame) {
+    html += `<div class="card"><h2>Freeze frame, captured when <span class="code">${esc(r.freeze_frame.trigger)}</span> set</h2>
+      <table>${r.freeze_frame.readings.map((x) => `<tr><th>${esc(x.name)}</th><td>${esc(x.display)}</td></tr>`).join("")}</table></div>`;
+  }
+  $("#codes").innerHTML = html;
+}
+
+$("#read-codes").onclick = () => busy($("#read-codes"), "Reading…", readCodes);
+$("#clear-codes").onclick = () => {
+  const ok = confirm(
+    "Clear trouble codes?\n\nThis also erases freeze-frame data and resets every readiness monitor. " +
+    "The vehicle will fail an emissions inspection until the monitors complete again (usually a few days of driving).\n\n" +
+    "Ignition should be ON with the engine OFF.");
+  if (ok) busy($("#clear-codes"), "Clearing…", async () => {
+    await api("/api/clear-dtc", {confirm: "clear"});
+    toast("Codes cleared.");
+    await readCodes();
+  });
+};
+
+// --- Vehicle ---
+
+$("#read-info").onclick = () => busy($("#read-info"), "Reading…", async () => {
+  const r = await api("/api/info");
+  const rows = [
+    ["VIN", r.vin ? `<span class="code">${esc(r.vin)}</span>` : '<span class="note">Not reported (common before 2005)</span>'],
+    ["OBD standard", esc(r.obd_standard ?? "–")],
+    ["Protocol", esc(`${r.protocol} · ${r.protocol_name}`)],
+    ["Adapter", esc(r.adapter)],
+    ["Battery", esc(r.voltage)],
+  ];
+  let html = `<div class="card"><table>${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</table></div>`;
+  for (const ecu of r.ecus) {
+    html += `<div class="card"><h2>${esc(ecu.ecu)}: check engine light
+      <span class="${ecu.mil_on ? "bad" : "ok"}">${ecu.mil_on ? "ON" : "off"}</span>, ${ecu.dtc_count} stored code(s)</h2>
+      <table>${ecu.monitors.map((m) => `<tr><th>${esc(m.name)}</th><td class="${m.complete ? "ok" : "bad"}">${m.complete ? "Complete" : "Not complete"}</td></tr>`).join("")}</table></div>`;
+  }
+  html += `<div class="card"><h2>Supported PIDs</h2><p class="note code">${r.supported.map(hex).join(" ")}</p></div>`;
+  $("#info").innerHTML = html;
+});
+
+$("#read-all").onclick = () => busy($("#read-all"), "Reading…", async () => {
+  const rows = await api("/api/readings");
+  $("#info").innerHTML = `<div class="card"><h2>All sensors</h2><table>${rows.map((r) =>
+    `<tr><th><span class="note code">${hex(r.pid)}</span> ${esc(r.name)}</th><td>${esc(r.display)}${r.ecu ? ` <span class="note">${esc(r.ecu)}</span>` : ""}</td></tr>`).join("")}</table></div>`;
+});
+</script>
+</body>
+</html>

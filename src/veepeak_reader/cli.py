@@ -10,13 +10,12 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from .dtc import decode_dtc, describe
+from . import reports
 from .elm327 import Elm327, ElmError, NoData
-from .obd import NegativeResponse, Vehicle, ecu_name, primary
-from .pids import PIDS, decode_monitor_status, format_value, parse_pid
+from .obd import NegativeResponse, Vehicle, primary
+from .pids import DEFAULT_LIVE, PIDS, format_value, parse_pid
 from .transport import BleTransport, TransportError, discover
 
-DEFAULT_LIVE = ["rpm", "speed", "coolant", "load", "throttle", "stft1", "ltft1", "stft2", "ltft2"]
 FORD_PWM_PCM_HEADER = "C410F1"  # priority C4, target PCM (10), tester (F1)
 CAN_ENGINE_HEADER = "7E0"  # physical request ID of the engine ECU (answers on 7E8)
 
@@ -52,37 +51,27 @@ async def cmd_scan(args) -> None:
 
 async def cmd_info(args) -> None:
     async with session(args) as v:
-        print(f"Adapter:     {v.elm.version}")
-        print(f"Battery:     {await v.elm.voltage()}")
-        print(f"Protocol:    {v.elm.protocol} - {v.elm.protocol_name}")
-        vin = await v.vin()
-        print(f"VIN:         {vin or 'not reported (mode 09 is uncommon before MY2005)'}")
-        supported = await v.supported_pids()
-        if 0x1C in supported:
-            print(f"OBD type:    {PIDS[0x1C].decode(primary(await v.pid(0x1C)))}")
-        for ecu, data in (await v.pid(0x01)).items():
-            ms = decode_monitor_status(data)
-            print(f"\nECU {ecu_name(ecu)}:  MIL {'ON' if ms.mil_on else 'off'}, {ms.dtc_count} stored code(s)")
-            print("Readiness monitors:")
-            for name, complete in ms.monitors:
-                print(f"  {name:<28} {'complete' if complete else 'NOT complete'}")
-        print("\nSupported mode 01 PIDs: " + " ".join(f"{p:02X}" for p in sorted(supported)))
+        info = await reports.vehicle_info(v)
+    print(f"Adapter:     {info['adapter']}")
+    print(f"Battery:     {info['voltage']}")
+    print(f"Protocol:    {info['protocol']} - {info['protocol_name']}")
+    print(f"VIN:         {info['vin'] or 'not reported (mode 09 is uncommon before MY2005)'}")
+    if info["obd_standard"]:
+        print(f"OBD type:    {info['obd_standard']}")
+    for ecu in info["ecus"]:
+        print(f"\nECU {ecu['ecu']}:  MIL {'ON' if ecu['mil_on'] else 'off'}, {ecu['dtc_count']} stored code(s)")
+        print("Readiness monitors:")
+        for m in ecu["monitors"]:
+            print(f"  {m['name']:<28} {'complete' if m['complete'] else 'NOT complete'}")
+    print("\nSupported mode 01 PIDs: " + " ".join(f"{p:02X}" for p in info["supported"]))
 
 
 async def cmd_pids(args) -> None:
     async with session(args) as v:
-        for pid in sorted(await v.supported_pids()):
-            if pid % 0x20 == 0 or pid in (0x01, 0x41):
-                continue  # bitmask / monitor PIDs are shown by `info`
-            try:
-                per_ecu = await v.pid(pid)
-            except (NoData, NegativeResponse):
-                continue
-            info = PIDS.get(pid)
-            for ecu, data in per_ecu.items():
-                value = format_value(info.decode(data), info.unit, args.imperial) if info else data.hex(" ").upper()
-                source = f"  [{ecu_name(ecu)}]" if len(per_ecu) > 1 else ""
-                print(f"{pid:02X}  {info.name if info else '(undecoded)':<38} {value}{source}")
+        rows = await reports.all_readings(v, args.imperial)
+    for row in rows:
+        source = f"  [{row['ecu']}]" if row["ecu"] else ""
+        print(f"{row['pid']:02X}  {row['name']:<38} {row['display']}{source}")
 
 
 async def cmd_live(args) -> None:
@@ -127,43 +116,27 @@ async def cmd_live(args) -> None:
 
 async def cmd_dtc(args) -> None:
     async with session(args) as v:
-        for label, mode in (("Stored", 0x03), ("Pending", 0x07), ("Permanent", 0x0A)):
-            codes = await v.dtcs(mode)
-            print(f"{label} codes:")
-            if mode == 0x0A and not codes:
-                print("  not supported (permanent codes exist on MY2010+ vehicles)")
-            elif not any(codes.values()):
-                print("  none")
-            for ecu, ecu_codes in codes.items():
-                for code in ecu_codes:
-                    print(f"  {code}  {describe(code)}  (ECU {ecu_name(ecu)})")
-        await _print_freeze_frame(v, args.imperial)
-
-
-async def _print_freeze_frame(v: Vehicle, imperial: bool) -> None:
-    try:
-        trigger = primary(await v.freeze_frame_pid(0x02))
-    except (NoData, NegativeResponse):
-        return
-    if not any(trigger):
-        return
-    print(f"\nFreeze frame (captured when {decode_dtc(trigger[0], trigger[1])} set):")
-    for pid in sorted(await v.freeze_frame_supported()):
-        info = PIDS.get(pid)
-        if not info:
-            continue
-        try:
-            data = primary(await v.freeze_frame_pid(pid))
-        except (NoData, NegativeResponse):
-            continue
-        print(f"  {info.name:<38} {format_value(info.decode(data), info.unit, imperial)}")
+        report = await reports.trouble_codes(v, args.imperial)
+    for label, key in (("Stored", "stored"), ("Pending", "pending"), ("Permanent", "permanent")):
+        print(f"{label} codes:")
+        codes = report[key]
+        if codes is None:
+            print("  not supported (permanent codes exist on MY2010+ vehicles)")
+        elif not codes:
+            print("  none")
+        for c in codes or []:
+            print(f"  {c['code']}  {c['description']}  (ECU {c['ecu']})")
+    if ff := report["freeze_frame"]:
+        print(f"\nFreeze frame (captured when {ff['trigger']} set):")
+        for r in ff["readings"]:
+            print(f"  {r['name']:<38} {r['display']}")
 
 
 async def cmd_clear(args) -> None:
     if not args.yes:
         print(
             "This clears stored codes and freeze-frame data and RESETS all readiness monitors.\n"
-            "The truck will fail an emissions inspection until the monitors complete again\n"
+            "The vehicle will fail an emissions inspection until the monitors complete again\n"
             "(usually a few days of mixed driving). Ignition should be ON, engine OFF."
         )
         if input("Type 'clear' to continue: ").strip().lower() != "clear":
@@ -225,6 +198,12 @@ async def cmd_probe(args) -> None:
         status(f"\n{found} DID(s) responded.")
 
 
+async def cmd_ui(args) -> None:
+    from .web import serve  # aiohttp is only needed for the UI
+
+    await serve(args)
+
+
 # --- Entry point ---
 
 def build_parser() -> argparse.ArgumentParser:
@@ -275,6 +254,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("ui", help="open the web dashboard in your browser")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument(
+        "--host", default="127.0.0.1",
+        help="interface to listen on; 0.0.0.0 lets a phone on the same Wi-Fi connect (no password!)",
+    )
+    p.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
+    p.set_defaults(func=cmd_ui)
     return parser
 
 

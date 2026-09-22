@@ -7,38 +7,7 @@ from veepeak_reader.elm327 import Elm327, ElmError, NoData, parse_response
 from veepeak_reader.obd import NegativeResponse, Vehicle, ecu_name, primary
 from veepeak_reader.pids import PIDS, decode_monitor_status, decode_supported, format_value, parse_pid
 
-
-class FakeTransport:
-    def __init__(self, responses: dict[str, str]):
-        self.responses = responses
-        self.sent: list[str] = []
-
-    async def send(self, command: str, timeout: float) -> str:
-        self.sent.append(command)
-        return self.responses.get(command, "NO DATA") + "\r\r"
-
-    async def close(self) -> None:
-        pass
-
-
-PWM_INIT = {
-    "ATZ": "ATZ\r\r\rELM327 v2.2",
-    "ATE0": "ATE0\rOK",
-    "ATL0": "OK",
-    "ATS1": "OK",
-    "ATH1": "OK",
-    "ATSP0": "OK",
-    "0100": "SEARCHING...\r41 6B 10 41 00 BE 3E B8 11 C9",
-    "ATDPN": "A1",
-}
-
-
-# 2019 RAV4-style CAN car: engine (7E8) and transmission (7E9) both answer 0100.
-CAN_INIT = {
-    **PWM_INIT,
-    "0100": "7E9 06 41 00 98 18 80 11\r7E8 06 41 00 BE 3F A8 13",
-    "ATDPN": "A6",
-}
+from fakes import CAN_INIT, PWM_INIT, FakeTransport
 
 
 async def make_vehicle(responses: dict[str, str], init=PWM_INIT) -> tuple[Vehicle, FakeTransport]:
@@ -194,7 +163,9 @@ def test_modern_pid_decoders():
 
 
 def test_units_and_aliases():
-    assert format_value(90, "°C", imperial=True) == "194.0 °F"
+    assert format_value(90, "°C", imperial=True) == "194 °F"
+    assert format_value(1726.25, "rpm", imperial=True) == "1726 rpm"
+    assert format_value(-3.125, "%", imperial=True) == "-3.1 %"
     assert format_value(100, "km/h", imperial=False) == "100 km/h"
     assert format_value(0.45, "V", imperial=True) == "0.450 V"
     assert parse_pid("rpm") == 0x0C and parse_pid("0x0d") == 0x0D and parse_pid("2F") == 0x2F

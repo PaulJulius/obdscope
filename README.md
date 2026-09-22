@@ -17,7 +17,29 @@ Bluetooth permission: System Settings → Privacy & Security → Bluetooth.
 You don't pair the adapter in System Settings. BLE adapters connect directly
 from the app.
 
-## Usage
+## Web dashboard
+
+```sh
+uv run veepeak ui
+```
+
+This opens a page in your browser with three tabs:
+
+- **Dashboard:** live gauges with a short trend line for each. Add or remove
+  gauges, change the sample rate, switch °F/°C, and record to CSV. Recordings
+  are saved to `recordings/`.
+- **Trouble codes:** stored, pending and permanent codes, and the freeze frame.
+  Clearing codes asks for confirmation first.
+- **Vehicle:** VIN, readiness monitors, supported PIDs, and a one-time read of
+  every sensor.
+
+The server only accepts connections from this Mac. To view the dashboard on a
+phone on the same Wi-Fi, run `uv run veepeak ui --host 0.0.0.0` and open
+`http://<mac-name>.local:8765/`. There's no password, so anyone on that
+network could also clear codes. Only use `--host 0.0.0.0` on a network you
+trust.
+
+## Command line
 
 Plug in the adapter, turn the ignition to ON (the engine can be off for most
 commands), then:
@@ -105,4 +127,6 @@ needed. Code layout:
 - `elm327.py`: AT commands, error handling, J1850/CAN frame parsing
 - `obd.py`: OBD services (modes 01, 02, 03/07/0A, 04, 09, 22), ECU naming
 - `pids.py` and `dtc.py`: decoders and descriptions
+- `reports.py`: multi-request reports (vehicle info, all sensors, trouble codes) shared by CLI and UI
 - `cli.py`: the `veepeak` command
+- `web.py` and `static/index.html`: the `veepeak ui` server and single-page dashboard

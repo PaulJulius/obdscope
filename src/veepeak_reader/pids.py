@@ -137,6 +137,8 @@ ALIASES = {
     "pedal": 0x49, "fuelrate": 0x5E, "torque": 0x62, "odometer": 0xA6,
 }
 
+DEFAULT_LIVE = ["rpm", "speed", "coolant", "load", "throttle", "stft1", "ltft1", "stft2", "ltft2"]
+
 
 def parse_pid(text: str) -> int:
     """Accept an alias (``rpm``) or hex PID (``0C`` / ``0x0C``)."""
@@ -201,10 +203,18 @@ def convert(value, unit: str, imperial: bool):
     return value, unit
 
 
-def format_value(value, unit: str, imperial: bool) -> str:
+def display(value, unit: str, imperial: bool) -> tuple[str, str]:
+    """Convert units and format a decoded value; returns (text, unit)."""
     value, unit = convert(value, unit, imperial)
     if isinstance(value, float):
-        text = f"{value:.3f}" if unit in ("V", "λ") else f"{value:.1f}"
+        if unit in ("V", "λ"):
+            text = f"{value:.3f}"
+        else:
+            text = f"{value:.0f}" if abs(value) >= 100 else f"{value:.1f}"
     else:
         text = str(value)
-    return f"{text} {unit}".rstrip()
+    return text, unit
+
+
+def format_value(value, unit: str, imperial: bool) -> str:
+    return " ".join(display(value, unit, imperial)).rstrip()
