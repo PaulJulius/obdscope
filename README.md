@@ -1,9 +1,9 @@
 # veepeak-reader
 
 A command-line tool for reading OBD-II data through a **Veepeak OBDCheck BLE**
-(ELM327-compatible, Bluetooth Low Energy) adapter. It's used with a 2001 Ford
-Expedition XLT and a 2019 Toyota RAV4 Adventure, but works with any OBD-II
-vehicle. The protocol is detected automatically.
+(ELM327-compatible, Bluetooth Low Energy) adapter. It works with any OBD-II
+vehicle, pre-CAN or modern, and detects the protocol automatically. It ships
+with two simulated vehicles so you can use it without a car.
 
 ## Setup
 
@@ -98,7 +98,7 @@ Global options can go before or after the command:
 | Option | Purpose |
 | --- | --- |
 | `--address UUID` | connect to a specific adapter (macOS shows a UUID, not a MAC) |
-| `--protocol N` | skip auto-detect: `1` for the Expedition (J1850 PWM), `6` for the RAV4 (CAN) |
+| `--protocol N` | skip auto-detect: `1` = J1850 PWM (older Fords), `6` = 11-bit CAN (most 2008+) |
 | `--metric` | metric units (default is °F / mph / psi) |
 | `--log FILE` | record every raw command and response, useful for figuring out odd behaviour |
 | `--simulate rav4\|expedition` | use a simulated vehicle instead of the adapter (see below) |
@@ -134,48 +134,33 @@ or fuel-delivery fault stays about the same at both. Multiply the correction
 by the airflow at each point: if a leak is the cause, both give the same
 grams per second of unmetered air.
 
-## Notes on the 2001 Expedition
+## What to expect from different vehicles
 
-- **Protocol:** The PCM uses **SAE J1850 PWM** (ELM327 protocol 1). The tool
-  turns headers on, so each reply shows which module answered. The PCM is
-  address `10`.
-- **VIN:** Mode 09 (vehicle info) wasn't required until about MY2005, but
-  this truck does report its VIN, and `info` shows it. Other vehicles of
-  the same era often don't; the tool handles either.
-- **Supported PIDs:** Expect roughly 15–20 standard PIDs: load, coolant temp,
-  fuel trims, MAP/MAF, RPM, speed, timing, IAT, throttle and O2 sensors.
-  Newer PIDs such as fuel level and ambient temperature are usually missing.
-- **Useful for diagnosis:** Fuel trims are the place to start with lean codes
-  like P0171/P0174, which are common on these trucks (often a vacuum leak or
-  a dirty MAF). `veepeak trims` is built for this; see above.
-- **Enhanced Ford data (mode 22):** Transmission temperature and similar values
-  are Ford-specific and not part of standard OBD-II. `probe` sends mode 22
-  requests with the header `C4 10 F1` (sent directly to the PCM) and lists
-  every identifier that answers. You'll have to work out what each value
-  means yourself, for example by watching it change while the truck warms up.
-  Probing only reads data. It never writes to the PCM.
+The protocol is detected automatically; these are the practical differences.
 
-## Notes on the 2019 RAV4 Adventure
+**Pre-CAN vehicles (roughly before 2008)** use J1850 PWM/VPW, ISO 9141 or KWP.
+Usually one module answers, and it supports far fewer PIDs — often just the
+20 or so covering load, temperatures, fuel trims, MAF/MAP, RPM, speed, timing,
+throttle and O2 sensors. Mode 09 (VIN) wasn't required until about MY2005 and
+may return nothing, and permanent codes (mode 0A) don't exist before 2010.
+Expect the odd frame to fail its checksum on these buses; the tool drops it
+and retries. Upstream O2 sensors are narrowband, switching between about
+0.1V and 0.9V several times a second once in closed loop.
 
-- **Protocol:** The RAV4 uses **ISO 15765-4 CAN, 11-bit, 500 kbaud** (ELM327
-  protocol 6). Several modules can answer the same request, commonly the
-  engine (`7E8`) and transmission (`7E9`). For single values (`live`, freeze
-  frame) the tool uses the engine's answer. `pids` and `info` label each
-  reply with the module that sent it.
-- **VIN:** The RAV4 reports it, so `info` shows it.
-- **More data:** Expect many more PIDs than the Expedition. These include
-  catalyst temperature (`cat1`), accelerator pedal, fuel level, ambient
-  temperature, control module voltage, and possibly odometer (`odometer`,
-  PID A6, which only some 2019+ vehicles support). The 2.5L engine's upstream
-  O2 sensor is a wideband air-fuel sensor, so it shows up as `Wideband O2 B1S1
-  lambda` (PID 24 or 34) rather than a 0–1 V reading. 1.000 is stoichiometric.
-- **Permanent codes:** `dtc` also lists permanent codes (mode 0A, MY2010+).
-  These can't be cleared with `clear-dtc`. The car clears them itself after
-  the fault is repaired and the related monitor passes.
-- **Enhanced Toyota data (mode 22):** On CAN, `probe` sends its requests
-  straight to the engine computer (ID `7E0`) instead of broadcasting. Toyota's
-  mode 22 identifiers aren't published, so treat the output as raw material to
-  investigate. To probe the transmission, use `--header 7E1`.
+**CAN vehicles (2008 on)** support many more PIDs, report a VIN, and often
+answer from several modules at once — commonly engine (`7E8`) and transmission
+(`7E9`). The tool uses the engine's reply where one value is needed and labels
+replies when several modules answer. Modern engines use a wideband upstream
+sensor that reads as lambda (1.000 is ideal) rather than a switching voltage.
+
+**Manufacturer data (mode 22)** is not part of standard OBD-II and isn't
+published. `probe` sweeps a range of identifiers and lists whatever answers,
+addressed to a specific module: `7E0` for the engine on CAN, `C4 10 F1` for a
+Ford PCM on J1850 PWM. Working out what a response means is up to you, for
+example by watching it change as the engine warms up. Probing only reads.
+
+**Your own vehicle notes:** `notes/` is gitignored, a place to keep VINs,
+supported PIDs, measurements and findings per vehicle without committing them.
 
 ## Development
 
