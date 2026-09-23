@@ -201,3 +201,15 @@ def test_trim_monitor(capsys):
     assert main(["--simulate", "rav4", "trims", "--count", "5", "--interval", "0", "--baseline", "2"]) == 0
     rav4 = capsys.readouterr().out
     assert "bank 1" in rav4 and "bank 2" not in rav4
+
+
+def test_sniff_lists_modules(capsys):
+    assert main(["--simulate", "expedition", "sniff", "--seconds", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "frames from 4 address(es)" in out
+    for source in ("10", "40", "28", "60"):  # powertrain plus three other modules
+        assert f" {source}     " in out
+
+    # The RAV4 profile has no chatter defined, so there is nothing to report.
+    assert main(["--simulate", "rav4", "sniff", "--seconds", "1"]) == 0
+    assert "No traffic seen" in capsys.readouterr().err

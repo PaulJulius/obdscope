@@ -82,20 +82,40 @@ class BleTransport:
             finally:
                 await self._client.disconnect()
 
+    async def stream(self, command: str, seconds: float) -> str:
+        """Run a monitoring command (ATMA and friends) for a while, then stop it.
+
+        Monitoring never returns a prompt on its own; any character stops it.
+        """
+        if not self._client:
+            raise TransportError("not connected")
+        self._buffer.clear()
+        self._prompt.clear()
+        await self._write((command + "\r").encode("ascii"))
+        await asyncio.sleep(seconds)
+        await self._write(b"x")  # stops monitoring; the adapter answers with a prompt
+        try:
+            await asyncio.wait_for(self._prompt.wait(), 3.0)
+        except asyncio.TimeoutError:
+            pass
+        return self._buffer.decode("ascii", errors="replace").rsplit(">", 1)[0]
+
     async def send(self, command: str, timeout: float) -> str:
         """Send one command and return everything the adapter replied before the ``>`` prompt."""
         if not self._client:
             raise TransportError("not connected")
         self._buffer.clear()
         self._prompt.clear()
-        payload = (command + "\r").encode("ascii")
-        for i in range(0, len(payload), BLE_CHUNK):
-            await self._client.write_gatt_char(self._tx, payload[i : i + BLE_CHUNK], response=self._tx_response)
+        await self._write((command + "\r").encode("ascii"))
         try:
             await asyncio.wait_for(self._prompt.wait(), timeout)
         except asyncio.TimeoutError:
             raise TransportError(f"timed out waiting for reply to {command!r}") from None
         return self._buffer.decode("ascii", errors="replace").rsplit(">", 1)[0]
+
+    async def _write(self, payload: bytes) -> None:
+        for i in range(0, len(payload), BLE_CHUNK):
+            await self._client.write_gatt_char(self._tx, payload[i : i + BLE_CHUNK], response=self._tx_response)
 
     def _on_notify(self, _characteristic, data: bytearray) -> None:
         self._buffer.extend(data)

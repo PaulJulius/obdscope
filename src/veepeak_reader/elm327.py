@@ -97,6 +97,18 @@ class Elm327:
         await self.command("0100", timeout=20.0)
         self.protocol = (await self.command("ATDPN"))[-1].lstrip("A")
 
+    async def monitor(self, seconds: float, command: str = "ATMA") -> list[str]:
+        """Listen to bus traffic without transmitting. Returns the raw frame lines."""
+        stream = getattr(self.transport, "stream", None)
+        if stream is None:
+            raise ElmError("this transport can't monitor the bus")
+        raw = await stream(command, seconds)
+        log.debug(">> %s (%.0fs) | << %r", command, seconds, raw)
+        return [
+            line.strip() for line in re.split(r"[\r\n]+", raw)
+            if line.strip() and line.strip() not in (command, "?", "STOPPED", "BUFFER FULL")
+        ]
+
     async def voltage(self) -> str:
         return (await self.command("ATRV"))[-1]
 

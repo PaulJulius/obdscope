@@ -90,6 +90,7 @@ uv run veepeak dtc                  # stored, pending, permanent codes and freez
 uv run veepeak clear-dtc            # clear codes (asks for confirmation)
 uv run veepeak raw                  # interactive ELM327 console
 uv run veepeak raw ATRV 010C        # one-shot raw commands
+uv run veepeak sniff                # listen to the bus, list the modules talking
 uv run veepeak probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
 ```
 
@@ -158,6 +159,21 @@ published. `probe` sweeps a range of identifiers and lists whatever answers,
 addressed to a specific module: `7E0` for the engine on CAN, `C4 10 F1` for a
 Ford PCM on J1850 PWM. Working out what a response means is up to you, for
 example by watching it change as the engine warms up. Probing only reads.
+
+**Other modules (ABS, restraints, body)** are not part of OBD-II, so `dtc`
+won't show their faults. Where they share the bus you can often reach them:
+`sniff` lists the addresses that are talking (it only listens, and transmits
+nothing), then address one directly with `raw`. Manufacturers use their own
+services for this — older Fords read codes with mode `13` rather than `03`:
+
+```sh
+uv run veepeak sniff                       # which modules are on the bus
+uv run veepeak raw ATSHC460F1 13           # ask module 60 for its codes
+```
+
+Be aware that many vehicles put safety and body modules on a separate network
+whose pins a standard ELM327 adapter doesn't wire up. If a module never
+answers, it may simply be unreachable with this hardware.
 
 **Your own vehicle notes:** `notes/` is gitignored, a place to keep VINs,
 supported PIDs, measurements and findings per vehicle without committing them.

@@ -273,6 +273,46 @@ async def cmd_raw(args) -> None:
                 print(f"error: {e}")
 
 
+async def cmd_sniff(args) -> None:
+    """Listen to the bus and report which modules are talking.
+
+    Standard OBD-II only reaches the powertrain. Other modules (ABS, restraints,
+    body) share the bus on many vehicles, and monitoring shows their addresses
+    without transmitting anything.
+    """
+    async with session(args, require_vehicle=False) as v:
+        await v.elm.command("ATH1")
+        status(f"Listening for {args.seconds:.0f}s (nothing is transmitted)...")
+        lines = await v.elm.monitor(args.seconds)
+        if not lines:
+            status("No traffic seen. Some modules only talk when something asks them to.")
+            return
+
+        senders: dict[str, dict] = {}
+        for line in lines:
+            tokens = line.split()
+            if len(tokens) < 4 or not all(len(t) == 2 and _is_hex_byte(t) for t in tokens):
+                continue
+            header, payload = tokens[:3], tokens[3:-1]
+            key = " ".join(header)
+            entry = senders.setdefault(key, {"count": 0, "modes": set(), "sample": " ".join(payload)})
+            entry["count"] += 1
+            if payload:
+                entry["modes"].add(payload[0])
+        print(f"{len(lines)} frames from {len(senders)} address(es)\n")
+        print(f"{'header':<10} {'count':>6}  {'from':<6} {'to':<6} {'first bytes':<24} services")
+        for key, entry in sorted(senders.items(), key=lambda kv: -kv[1]["count"]):
+            priority, target, source = key.split()
+            print(f"{key:<10} {entry['count']:>6}  {source:<6} {target:<6} {entry['sample'][:24]:<24} "
+                  f"{' '.join(sorted(entry['modes'])[:6])}")
+        print("\n'from' is the module that sent the frame. To talk to one directly, set the header\n"
+              "to its address, e.g. `veepeak raw ATSHC4<from>F1 <request>`.")
+
+
+def _is_hex_byte(token: str) -> bool:
+    return all(c in "0123456789ABCDEFabcdef" for c in token)
+
+
 async def cmd_probe(args) -> None:
     start, end = int(args.start, 16), int(args.end, 16)
     async with session(args) as v:
@@ -371,6 +411,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("commands", nargs="*")
     p.add_argument("--timeout", type=float, default=5.0)
     p.set_defaults(func=cmd_raw)
+
+    p = add("sniff", help="listen to bus traffic and list the modules that are talking")
+    p.add_argument("--seconds", type=float, default=10.0, help="how long to listen")
+    p.set_defaults(func=cmd_sniff)
 
     p = add("probe", help="sweep a range of manufacturer (mode 22) data identifiers")
     p.add_argument("start", help="first DID, hex (e.g. 1100)")

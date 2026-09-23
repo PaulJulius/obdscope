@@ -30,7 +30,7 @@ import asyncio
 import math
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Callable
 
@@ -90,6 +90,9 @@ class Profile:
     enhanced: dict[str, dict[int, Callable[[DriveState], bytes]]]  # physical header -> DID -> encoder
     distance_since_clear: float         # km
     minutes_since_clear: float
+    # Periodic chatter as (priority, target, source, payload) hex; invented, but shaped
+    # like real traffic: several modules besides the powertrain share the bus.
+    chatter: list[tuple[str, str, str, str]] = field(default_factory=list)
     distance_with_mil: float = 0.0
     fuel_level: float = 60.0            # % at start
 
@@ -132,6 +135,12 @@ EXPEDITION = Profile(
             0x11B0: lambda s: bytes([0x02 if s.closed_loop else 0x01]),
         },
     },
+    chatter=[
+        ("3D", "60", "10", "05 20 1A 00"),   # powertrain
+        ("3D", "60", "40", "10 04 00 00"),   # restraints-like module
+        ("3D", "60", "28", "41 01 80 00"),   # brakes-like module
+        ("3D", "60", "60", "23 00 11 00"),   # cluster-like module
+    ],
     distance_since_clear=2917,
     minutes_since_clear=0,
     distance_with_mil=412,
@@ -277,6 +286,19 @@ class SimulatedTransport:
         self._reset()
 
     # Transport interface
+
+    async def stream(self, command: str, seconds: float) -> str:
+        """Bus monitoring (ATMA): replay this vehicle's periodic chatter."""
+        if not command.upper().startswith("ATMA"):
+            return "?\r\r"
+        if LATENCY_SCALE:
+            await asyncio.sleep(seconds * LATENCY_SCALE)
+        lines = []
+        for round_ in range(max(1, int(seconds * 2))):
+            for priority, target, source, payload in self.profile.chatter:
+                frame = bytes.fromhex((priority + target + source + payload).replace(" ", ""))
+                lines.append(self._hex(frame + bytes([_j1850_crc(frame)])))
+        return "\r".join(lines) + "\r\r"
 
     async def connect(self) -> None:
         await asyncio.sleep(0.8 * LATENCY_SCALE)  # scanning and GATT setup
