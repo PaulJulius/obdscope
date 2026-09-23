@@ -60,6 +60,9 @@ This opens a page in your browser with three tabs:
 - **Dashboard:** live gauges with a short trend line for each. Add or remove
   gauges, change the sample rate, switch °F/°C, and record to CSV. Recordings
   are saved to `recordings/`.
+  **Leak hunt** adds a panel with the total fuel correction per bank against
+  a baseline, the same workflow as `veepeak trims` but readable from a phone
+  while you're under the hood (`veepeak ui --host 0.0.0.0`).
 - **Trouble codes:** stored, pending and permanent codes, and the freeze frame.
   Clearing codes asks for confirmation first.
 - **Vehicle:** VIN, readiness monitors, supported PIDs, and a one-time read of

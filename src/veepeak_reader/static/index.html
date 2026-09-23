@@ -64,6 +64,22 @@
   .gauge svg polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .gauge .remove { position: absolute; top: 6px; right: 6px; border: 0; background: none; color: var(--muted); padding: 2px 6px; font-size: 16px; line-height: 1; }
 
+  #leak { display: none; }
+  #leak.on { display: block; }
+  #leak h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #leak-reset { margin-left: auto; font-size: 13px; padding: 4px 10px; }
+  .leak-bank { display: grid; grid-template-columns: 70px 1fr; gap: 4px 12px; align-items: center; margin-bottom: 14px; }
+  .leak-bank .label { color: var(--muted); font-size: 13px; }
+  .leak-bank .total { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .leak-bank .delta { grid-column: 2; font-size: 15px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .track { grid-column: 2; position: relative; height: 12px; background: var(--border); border-radius: 6px; }
+  .track .mid { position: absolute; left: 50%; top: -3px; width: 2px; height: 18px; background: var(--muted); opacity: .6; }
+  .track .mark { position: absolute; top: -2px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent);
+                 transform: translateX(-50%); transition: left .2s; }
+  .track-ends { grid-column: 2; display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  #leak-status { font-size: 17px; font-weight: 600; padding: 10px 0 2px; }
+  #leak-status.found { color: var(--ok); }
+  #leak-status.maybe { color: var(--warn); }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; overflow-x: auto; }
   .card h2 { font-size: 15px; margin: 0 0 8px; }
   table { width: 100%; border-collapse: collapse; }
@@ -102,9 +118,16 @@
       <label class="note">Every <select id="interval">
         <option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option><option value="5">5 s</option>
       </select></label>
+      <button id="leak-toggle" class="needs-connection">Leak hunt</button>
       <span class="spacer"></span>
       <span id="rec-path" class="note"></span>
       <button id="record" class="rec">Record</button>
+    </div>
+    <div id="leak" class="card">
+      <h2>Leak hunt <span id="leak-baseline" class="note"></span>
+        <button id="leak-reset">Reset baseline</button></h2>
+      <div id="leak-banks"></div>
+      <div id="leak-status"></div>
     </div>
     <div id="gauges" class="grid"></div>
     <p id="gauges-empty" class="empty">Plug in the adapter, turn the ignition on, and press Connect.</p>
@@ -136,6 +159,11 @@ let state = null;
 let sparkData = {};  // pid -> recent numeric values for sparklines
 let latest = {};   // pid -> last sample value
 const busyButtons = new Set();
+// Leak hunt: total fuel correction (short + long term) per bank, against a baseline.
+const TRIM_PIDS = {1: [0x06, 0x07], 2: [0x08, 0x09]};
+const LEAK_BASELINE = 10;   // samples that set the baseline
+const LEAK_FOUND = 5;       // % drop that means the leak is blocked
+let leak = {on: false, banks: {}, baseline: null, collected: {}};
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const hex = (pid) => pid.toString(16).toUpperCase().padStart(2, "0");
@@ -216,6 +244,11 @@ function applyState(next) {
   $("#record").textContent = recording ? "Stop recording" : "Record";
   $("#record").classList.toggle("on", recording);
   $("#record").disabled = !connected;
+  $("#leak-toggle").textContent = leak.on ? "Stop leak hunt" : "Leak hunt";
+  if (!connected && leak.on) {
+    leak.on = false;
+    renderLeak();
+  }
   $("#rec-path").textContent = recording ? `→ ${state.recording}` : "";
 
   const add = $("#add-gauge");
@@ -245,6 +278,92 @@ function renderGauges() {
   state.gauges.forEach((pid) => { if (latest[pid] !== undefined) updateGauge(pid, latest[pid]); });
 }
 
+function resetBaseline() {
+  leak.baseline = null;
+  leak.collected = Object.fromEntries(Object.keys(leak.banks).map((b) => [b, []]));
+  renderLeak();
+}
+
+function updateLeak() {
+  if (!leak.on) return;
+  const totals = {};
+  for (const [bank, [stft, ltft]] of Object.entries(leak.banks)) {
+    const a = latest[stft], b = latest[ltft];
+    if (a && b && a.num !== null && b.num !== null) totals[bank] = a.num + b.num;
+  }
+  if (!leak.baseline) {
+    for (const [bank, total] of Object.entries(totals)) {
+      if (leak.collected[bank].length < LEAK_BASELINE) leak.collected[bank].push(total);
+    }
+    const counts = Object.values(leak.collected).map((c) => c.length);
+    if (counts.length && Math.min(...counts) >= LEAK_BASELINE) {
+      leak.baseline = Object.fromEntries(Object.entries(leak.collected)
+        .map(([bank, c]) => [bank, c.reduce((x, y) => x + y, 0) / c.length]));
+    }
+  }
+  renderLeak(totals);
+}
+
+function renderLeak(totals = {}) {
+  $("#leak").classList.toggle("on", leak.on);
+  if (!leak.on) return;
+  const scale = 25;  // % at the ends of the track
+  let worst = 0;
+  $("#leak-banks").innerHTML = Object.keys(leak.banks).map((bank) => {
+    const total = totals[bank];
+    const base = leak.baseline?.[bank];
+    const delta = total !== undefined && base !== undefined ? total - base : null;
+    if (delta !== null) worst = Math.min(worst, delta);
+    const pos = 50 + Math.max(-50, Math.min(50, (delta ?? 0) / scale * 50));
+    return `
+      <div class="leak-bank">
+        <span class="label">Bank ${esc(bank)}</span>
+        <span class="total">${total === undefined ? "–" : (total >= 0 ? "+" : "") + total.toFixed(1) + "%"}</span>
+        ${delta === null ? "" : `<span class="delta">${delta >= 0 ? "+" : ""}${delta.toFixed(1)}% vs baseline</span>`}
+        <div class="track"><div class="mid"></div>${delta === null ? "" : `<div class="mark" style="left:${pos}%"></div>`}</div>
+        <div class="track-ends"><span>leaner (leak blocked)</span><span>richer</span></div>
+      </div>`;
+  }).join("");
+
+  const status = $("#leak-status");
+  const collected = Math.min(...Object.values(leak.collected).map((c) => c.length), LEAK_BASELINE);
+  if (!leak.baseline) {
+    status.className = "";
+    status.textContent = `Hold steady at idle… setting baseline (${collected}/${LEAK_BASELINE})`;
+    $("#leak-baseline").textContent = "";
+  } else {
+    $("#leak-baseline").textContent = "baseline " + Object.entries(leak.baseline)
+      .map(([bank, v]) => `bank ${bank} ${v >= 0 ? "+" : ""}${v.toFixed(1)}%`).join(", ");
+    if (worst <= -LEAK_FOUND) {
+      status.className = "found";
+      status.textContent = `LEANER by ${(-worst).toFixed(1)}% — whatever you just blocked is (part of) the leak`;
+    } else if (worst <= -LEAK_FOUND / 2) {
+      status.className = "maybe";
+      status.textContent = `Slight drop (${(-worst).toFixed(1)}%) — hold it blocked a moment`;
+    } else {
+      status.className = "";
+      status.textContent = "No change yet — block the next hose";
+    }
+  }
+}
+
+$("#leak-toggle").onclick = () => busy($("#leak-toggle"), "…", async () => {
+  if (leak.on) {
+    leak.on = false;
+    renderLeak();
+    return;
+  }
+  const available = new Set(state.available.map((p) => p.pid));
+  leak.banks = Object.fromEntries(Object.entries(TRIM_PIDS).filter(([, pids]) => pids.every((p) => available.has(p))));
+  if (!Object.keys(leak.banks).length) throw new Error("this vehicle doesn't report fuel trims");
+  const needed = Object.values(leak.banks).flat().filter((p) => !state.gauges.includes(p));
+  if (needed.length) await api("/api/gauges", {pids: [...state.gauges, ...needed]});
+  leak.on = true;
+  resetBaseline();
+});
+
+$("#leak-reset").onclick = resetBaseline;
+
 function applySample(sample) {
   for (const [key, value] of Object.entries(sample.values)) {
     const pid = Number(key);
@@ -256,6 +375,7 @@ function applySample(sample) {
     }
     updateGauge(pid, value);
   }
+  updateLeak();
 }
 
 function updateGauge(pid, value) {
