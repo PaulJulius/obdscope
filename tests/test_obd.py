@@ -7,7 +7,7 @@ from veepeak_reader.elm327 import Elm327, ElmError, NoData, parse_response
 from veepeak_reader.obd import NegativeResponse, Vehicle, ecu_name, primary
 from veepeak_reader.pids import PIDS, decode_monitor_status, decode_supported, format_value, parse_pid
 
-from fakes import CAN_INIT, PWM_INIT, FakeTransport
+from fakes import CAN_INIT, PWM_INIT, FakeBleTransport, FakeTransport
 
 
 async def make_vehicle(responses: dict[str, str], init=PWM_INIT) -> tuple[Vehicle, FakeTransport]:
@@ -194,7 +194,7 @@ async def test_drops_corrupt_frames_and_retries():
     assert transport.sent.count("0119") == 2  # first attempt dropped, second used
 
     # A corrupt frame alongside a good one from another ECU: keep the good one.
-    transport = FakeTransport({**PWM_INIT, "0105": f"41 6B 10 41 05 58 EA\r41 6B 18 41 05 58 <RX ERROR"})
+    transport = FakeTransport({**PWM_INIT, "0105": "41 6B 10 41 05 58 EA\r41 6B 18 41 05 58 <RX ERROR"})
     elm = Elm327(transport)
     await elm.initialize()
     assert await elm.request("0105") == {"10": [bytes.fromhex("410558")]}
@@ -207,3 +207,20 @@ async def test_gives_up_after_repeated_corruption():
     with pytest.raises(ElmError, match="checksum error"):
         await elm.request("0105")
     assert transport.sent.count("0105") == 3
+
+
+def test_trim_monitor_flags_a_blocked_leak(monkeypatch, capsys):
+    """Long term trim +27% then dropping to +5%: what blocking the leak looks like."""
+    from veepeak_reader import cli
+
+    high, low = "41 6B 10 41 07 A3 00", "41 6B 10 41 07 86 00"
+    transport = FakeBleTransport({
+        **PWM_INIT,
+        "0106": "41 6B 10 41 06 80 00",                  # short term steady at 0%
+        "0107": [high, high, high, high, low],           # long term drops once blocked
+    })
+    monkeypatch.setattr(cli, "make_transport", lambda *a, **k: transport)
+    assert cli.main(["trims", "--count", "6", "--interval", "0", "--baseline", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "bank 1" in out and "bank 2" not in out
+    assert "LEANER by 22" in out  # +27.3% baseline -> +4.7%

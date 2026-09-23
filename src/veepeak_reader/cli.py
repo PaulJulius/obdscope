@@ -128,6 +128,92 @@ async def cmd_live(args) -> None:
                 csv_file.close()
 
 
+BANKS = {1: (0x06, 0x07), 2: (0x08, 0x09)}  # bank -> (short term PID, long term PID)
+BAR_WIDTH = 25   # odd, so there is a centre column
+BAR_SCALE = 25.0  # % correction at the bar's edge
+
+
+def _bar(delta: float) -> str:
+    half = BAR_WIDTH // 2
+    cells = ["·"] * BAR_WIDTH
+    cells[half] = "|"
+    cells[half + max(-half, min(half, round(delta / BAR_SCALE * half)))] = "#"
+    return "".join(cells)
+
+
+async def cmd_trims(args) -> None:
+    """Live fuel trims for leak hunting: block a leak and the demand for fuel drops."""
+    async with session(args) as v:
+        supported = await v.supported_pids()
+        banks = {b: pids for b, pids in BANKS.items() if pids[0] in supported and pids[1] in supported}
+        if not banks:
+            raise ElmError("this vehicle doesn't report fuel trims")
+        context = [p for p in (0x0C, 0x10, 0x05) if p in supported]
+
+        async def read(pid):
+            try:
+                return PIDS[pid].decode(primary(await v.pid(pid)))
+            except (NoData, NegativeResponse):
+                return None
+
+        status(
+            f"Fuel trim monitor. Watching {len(banks)} bank(s); a reading of 0% means the engine needs no correction.\n"
+            f"The first {args.baseline} samples set the baseline, then block a suspected leak and watch for a drop.\n"
+            "Ctrl-C to stop.\n"
+        )
+        history, baseline, lines_drawn = {b: [] for b in banks}, {}, 0
+        sample = 0
+        while args.count is None or sample < args.count:
+            started = time.monotonic()
+            totals = {}
+            for bank, (stft_pid, ltft_pid) in banks.items():
+                stft, ltft = await read(stft_pid), await read(ltft_pid)
+                totals[bank] = None if stft is None or ltft is None else (stft, ltft, stft + ltft)
+                if totals[bank] and len(history[bank]) < args.baseline:
+                    history[bank].append(totals[bank][2])
+            readings = {pid: await read(pid) for pid in context}
+
+            if not baseline and all(len(h) >= args.baseline for h in history.values()):
+                baseline = {b: sum(h) / len(h) for b, h in history.items()}
+
+            out = []
+            if baseline:
+                out.append(f"  {'':<8}{'short':>8}{'long':>8}{'total':>9}{'change':>9}   leaner {'':<10} richer")
+            else:
+                out.append(f"  {'':<8}{'short':>8}{'long':>8}{'total':>9}   measuring baseline ({max(len(h) for h in history.values())}/{args.baseline})")
+            drop = 0.0
+            for bank, values in totals.items():
+                if not values:
+                    out.append(f"  bank {bank}   (no data)")
+                    continue
+                stft, ltft, total = values
+                if baseline:
+                    delta = total - baseline[bank]
+                    drop = min(drop, delta)
+                    out.append(f"  bank {bank}  {stft:+7.1f}%{ltft:+7.1f}%{total:+8.1f}%{delta:+8.1f}%   {_bar(delta)}")
+                else:
+                    out.append(f"  bank {bank}  {stft:+7.1f}%{ltft:+7.1f}%{total:+8.1f}%")
+            out.append("  " + "   ".join(
+                f"{PIDS[pid].name.split(',')[0].lower()} {format_value(readings[pid], PIDS[pid].unit, args.imperial)}"
+                for pid in context if readings.get(pid) is not None
+            ))
+            if not baseline:
+                out.append("  hold steady at idle...")
+            elif drop <= -args.threshold:
+                out.append(f"  >>> LEANER by {-drop:.1f}% -- whatever you just blocked is (part of) the leak")
+            elif drop <= -args.threshold / 2:
+                out.append(f"  ... slight drop ({-drop:.1f}%), keep it blocked a moment")
+            else:
+                out.append("  no change yet -- block the next hose")
+
+            if lines_drawn:
+                print(f"\033[{lines_drawn}F", end="")  # redraw in place
+            print("\n".join(f"{line:<78}" for line in out))
+            lines_drawn = len(out)
+            sample += 1
+            await asyncio.sleep(max(0.0, args.interval - (time.monotonic() - started)))
+
+
 async def cmd_dtc(args) -> None:
     async with session(args) as v:
         report = await reports.trouble_codes(v, args.imperial)
@@ -267,6 +353,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--count", type=int, help="stop after N samples")
     p.add_argument("--csv", metavar="FILE", help="also write samples to a CSV file")
     p.set_defaults(func=cmd_live)
+
+    p = add("trims", help="live fuel trim monitor for hunting vacuum leaks")
+    p.add_argument("--interval", type=float, default=0.5, help="seconds between samples")
+    p.add_argument("--baseline", type=int, default=8, help="samples used to set the baseline")
+    p.add_argument("--threshold", type=float, default=5.0, help="%% drop that counts as finding the leak")
+    p.add_argument("--count", type=int, help="stop after N samples")
+    p.set_defaults(func=cmd_trims)
 
     add("dtc", help="stored, pending and permanent trouble codes, plus freeze frame").set_defaults(func=cmd_dtc)
 

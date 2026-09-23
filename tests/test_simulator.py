@@ -188,3 +188,16 @@ def test_cli_against_simulators(capsys, tmp_path):
 
     assert main(["--simulate", "rav4", "--protocol", "1", "info"]) == 1
     assert "UNABLE TO CONNECT" in capsys.readouterr().err
+
+
+def test_trim_monitor(capsys):
+    assert main(["--simulate", "expedition", "trims", "--count", "10", "--interval", "0", "--baseline", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "bank 1" in out and "bank 2" in out
+    assert "measuring baseline" in out and "change" in out
+    assert "no change yet" in out or "slight drop" in out
+
+    # A 4-cylinder reports bank 1 only.
+    assert main(["--simulate", "rav4", "trims", "--count", "5", "--interval", "0", "--baseline", "2"]) == 0
+    rav4 = capsys.readouterr().out
+    assert "bank 1" in rav4 and "bank 2" not in rav4
