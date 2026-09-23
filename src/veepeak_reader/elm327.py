@@ -37,8 +37,13 @@ CAN_29BIT = {"7", "9"}
 
 _ERRORS = {
     "?", "UNABLE TO CONNECT", "CAN ERROR", "BUS ERROR", "BUS BUSY", "FB ERROR",
-    "DATA ERROR", "BUFFER FULL", "STOPPED", "LV RESET", "ACT ALERT", "<RX ERROR",
+    "DATA ERROR", "BUFFER FULL", "STOPPED", "LV RESET", "ACT ALERT",
 }
+# The adapter marks a frame whose checksum failed by appending one of these to
+# the line, e.g. "41 6B 10 41 19 05 FF F8 <DATA ERROR". Noise on the bus makes
+# this normal on J1850; the frame is dropped and the request retried.
+_CORRUPT_MARKERS = ("<DATA ERROR", "<RX ERROR", "<ERROR")
+DEFAULT_ATTEMPTS = 3
 Messages = dict[str, list[bytes]]
 
 
@@ -53,6 +58,10 @@ class ElmError(Exception):
 
 class NoData(ElmError):
     """The vehicle did not answer (normal for unsupported requests)."""
+
+
+class CorruptResponse(ElmError):
+    """Every frame failed its checksum; worth retrying."""
 
 
 class Elm327:
@@ -70,11 +79,20 @@ class Elm327:
     def is_can(self) -> bool:
         return self.protocol in CAN_11BIT | CAN_29BIT
 
-    async def initialize(self) -> None:
+    async def initialize(self, connect_vehicle: bool = True) -> None:
+        """Configure the adapter and, unless told otherwise, open the vehicle bus.
+
+        ``connect_vehicle=False`` sets the adapter up without talking to the
+        car, which is all that AT commands (ATRV and friends) need.
+        """
         lines = await self.command("ATZ", timeout=5.0)
         self.version = next((line for line in lines if "ELM" in line.upper()), "unknown")
         for cmd in ("ATE0", "ATL0", "ATS1", "ATH1", f"ATSP{self.requested_protocol}"):
             await self.command(cmd)
+        if connect_vehicle:
+            await self.connect_vehicle()
+
+    async def connect_vehicle(self) -> None:
         # The first OBD request makes the adapter search for / open the bus.
         await self.command("0100", timeout=20.0)
         self.protocol = (await self.command("ATDPN"))[-1].lstrip("A")
@@ -86,10 +104,14 @@ class Elm327:
         """Send a command and return its cleaned response lines, raising on adapter errors."""
         raw = await self.transport.send(cmd, timeout)
         log.debug(">> %s | << %r", cmd, raw)
-        lines = []
+        lines, corrupt = [], False
         for line in re.split(r"[\r\n]+", raw):
             line = line.strip()
             if not line or line == cmd or line.startswith("SEARCHING"):
+                continue
+            if any(marker in line for marker in _CORRUPT_MARKERS):
+                log.warning("%s: dropped corrupt frame %r", cmd, line)
+                corrupt = True
                 continue
             if line.startswith("BUS INIT"):
                 if "ERROR" in line:
@@ -100,11 +122,23 @@ class Elm327:
             if line in _ERRORS or line.startswith("ERR"):
                 raise ElmError(f"{cmd}: {line}")
             lines.append(line)
+        if corrupt and not lines:
+            raise CorruptResponse(f"{cmd}: checksum error")
         return lines
 
-    async def request(self, hex_request: str, timeout: float = 5.0) -> Messages:
-        """Send an OBD request (hex string) and return messages grouped by responding ECU."""
-        return parse_response(await self.command(hex_request, timeout), self.protocol)
+    async def request(self, hex_request: str, timeout: float = 5.0, attempts: int = DEFAULT_ATTEMPTS) -> Messages:
+        """Send an OBD request (hex string) and return messages grouped by responding ECU.
+
+        Retries when the bus hands back nothing but corrupt frames.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                lines = await self.command(hex_request, timeout)
+            except CorruptResponse:
+                if attempt == attempts:
+                    raise
+                continue
+            return parse_response(lines, self.protocol)
 
 
 def parse_response(lines: list[str], protocol: str | None) -> Messages:

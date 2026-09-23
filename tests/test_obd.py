@@ -171,3 +171,39 @@ def test_units_and_aliases():
     assert parse_pid("rpm") == 0x0C and parse_pid("0x0d") == 0x0D and parse_pid("2F") == 0x2F
     with pytest.raises(ValueError):
         parse_pid("bogus")
+
+
+async def test_adapter_usable_when_vehicle_is_asleep():
+    """Key off: the bus never opens, but AT commands still work."""
+    transport = FakeTransport({**PWM_INIT, "0100": "SEARCHING...\rUNABLE TO CONNECT", "ATRV": "12.4V"})
+    elm = Elm327(transport)
+    await elm.initialize(connect_vehicle=False)
+    assert elm.version == "ELM327 v2.2"
+    assert await elm.voltage() == "12.4V"
+    with pytest.raises(ElmError, match="UNABLE TO CONNECT"):
+        await elm.connect_vehicle()
+
+
+async def test_drops_corrupt_frames_and_retries():
+    """J1850 buses produce the odd bad checksum; the adapter flags it inline."""
+    good = "41 6B 10 41 19 05 FF F8"
+    transport = FakeTransport({**PWM_INIT, "0119": [f"{good} <DATA ERROR", good]})
+    elm = Elm327(transport)
+    await elm.initialize()
+    assert await elm.request("0119") == {"10": [bytes.fromhex("411905FF")]}
+    assert transport.sent.count("0119") == 2  # first attempt dropped, second used
+
+    # A corrupt frame alongside a good one from another ECU: keep the good one.
+    transport = FakeTransport({**PWM_INIT, "0105": f"41 6B 10 41 05 58 EA\r41 6B 18 41 05 58 <RX ERROR"})
+    elm = Elm327(transport)
+    await elm.initialize()
+    assert await elm.request("0105") == {"10": [bytes.fromhex("410558")]}
+
+
+async def test_gives_up_after_repeated_corruption():
+    transport = FakeTransport({**PWM_INIT, "0105": "41 6B 10 41 05 58 EA <DATA ERROR"})
+    elm = Elm327(transport)
+    await elm.initialize()
+    with pytest.raises(ElmError, match="checksum error"):
+        await elm.request("0105")
+    assert transport.sent.count("0105") == 3

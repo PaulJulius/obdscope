@@ -112,6 +112,11 @@ async def test_expedition_codes_clear_and_come_back():
     assert await v.dtcs(0x07) == {"10": ["P0171"]}
 
 
+async def test_expedition_reports_vin():
+    v, _, _ = await open_vehicle("expedition")
+    assert await v.vin() == "1FMSIMEXP01LA0001"
+
+
 async def test_rav4_vin_codes_and_two_ecus():
     v, _, _ = await open_vehicle("rav4")
     assert await v.vin() == "2T3SIMRAV4KW00001"

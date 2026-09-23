@@ -41,6 +41,7 @@ loop.
 | --- | --- | --- |
 | Protocol | J1850 PWM, one PCM (`10`) | CAN 11-bit, engine `7E8` + transmission `7E9` |
 | Check engine light | On: P0171, P0174 (lean, both banks) | Off. Pending P0456 (tiny evap leak) |
+| VIN | reported (as the real truck does) | reported |
 | What to notice | Long-term fuel trims around +14% at idle, near +3% at speed: a vacuum-leak pattern. Clear the codes and P0171 returns as pending about a minute later. | VIN, permanent codes, wideband O2 (`Wideband O2 B1S1 lambda`), catalyst temperature |
 | `probe` finds | a few DIDs in `1100`–`11FF` | DIDs in `1000`–`10FF` (engine), `--header 7E1` for transmission |
 
@@ -108,8 +109,9 @@ support are skipped, so e.g. the bank 2 trims drop out on the RAV4's 4-cylinder.
 - **Protocol:** The PCM uses **SAE J1850 PWM** (ELM327 protocol 1). The tool
   turns headers on, so each reply shows which module answered. The PCM is
   address `10`.
-- **VIN:** Mode 09 (vehicle info) wasn't required until about MY2005, so
-  `info` will probably say the VIN isn't reported.
+- **VIN:** Mode 09 (vehicle info) wasn't required until about MY2005, but
+  this truck does report its VIN, and `info` shows it. Other vehicles of
+  the same era often don't; the tool handles either.
 - **Supported PIDs:** Expect roughly 15–20 standard PIDs: load, coolant temp,
   fuel trims, MAP/MAF, RPM, speed, timing, IAT, throttle and O2 sensors.
   Newer PIDs such as fuel level and ambient temperature are usually missing.

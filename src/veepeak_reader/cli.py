@@ -19,6 +19,10 @@ from .transport import TransportError, discover, make_transport
 
 FORD_PWM_PCM_HEADER = "C410F1"  # priority C4, target PCM (10), tester (F1)
 CAN_ENGINE_HEADER = "7E0"  # physical request ID of the engine ECU (answers on 7E8)
+VEHICLE_HINT = (
+    "The adapter is connected but the vehicle's computer isn't answering. Turn the ignition to ON\n"
+    "(dash lights up; the engine doesn't need to run). Adapter-only commands still work: `veepeak raw ATRV`."
+)
 
 
 def status(message: str) -> None:
@@ -26,15 +30,21 @@ def status(message: str) -> None:
 
 
 @asynccontextmanager
-async def session(args):
+async def session(args, require_vehicle: bool = True):
     transport = make_transport(args.simulate, address=args.address, name=args.name)
     status(f"Connecting to {'simulated ' + PROFILES[args.simulate].label if args.simulate else 'adapter'}...")
     await transport.connect()
     try:
         status(f"Connected to {transport.device.name or 'adapter'} ({transport.device.address}). Initializing...")
         elm = Elm327(transport, protocol=args.protocol)
-        await elm.initialize()
-        status(f"{elm.version}, protocol {elm.protocol}: {elm.protocol_name}\n")
+        await elm.initialize(connect_vehicle=False)
+        try:
+            await elm.connect_vehicle()
+            status(f"{elm.version}, protocol {elm.protocol}: {elm.protocol_name}\n")
+        except ElmError as e:
+            if require_vehicle:
+                raise ElmError(f"{e}\n{VEHICLE_HINT}") from None
+            status(f"{elm.version}, but the vehicle is not responding ({e}).\n{VEHICLE_HINT}\n")
         yield Vehicle(elm)
     finally:
         await transport.close()
@@ -152,7 +162,8 @@ async def cmd_clear(args) -> None:
 
 
 async def cmd_raw(args) -> None:
-    async with session(args) as v:
+    # AT commands talk to the adapter alone, so don't insist on reaching the vehicle.
+    async with session(args, require_vehicle=False) as v:
         async def run(command: str) -> None:
             reply = await v.elm.transport.send(command.strip().upper(), timeout=args.timeout)
             print("\n".join(line for line in reply.replace("\r", "\n").split("\n") if line.strip()))

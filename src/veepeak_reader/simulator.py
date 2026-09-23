@@ -14,8 +14,8 @@ supported PIDs and trouble codes:
 * ``expedition``: 2001 Ford Expedition XLT, 5.4L V8, J1850 PWM, one PCM.
   Check engine light on for P0171/P0174 (lean, both banks), with long term
   fuel trims high at idle and closer to normal at speed, the pattern of a
-  vacuum leak. No VIN over OBD. If codes are cleared, P0171 comes back as
-  pending after a minute, because the "leak" is still there.
+  vacuum leak. If codes are cleared, P0171 comes back as pending after a
+  minute, because the "leak" is still there.
 * ``rav4``: 2019 Toyota RAV4 Adventure, 2.5L 4-cylinder, 11-bit CAN, with
   engine (7E8) and transmission (7E9) ECUs. No stored codes, pending P0456
   (tiny evap leak), wideband upstream O2 sensor, VIN available.
@@ -110,7 +110,7 @@ EXPEDITION = Profile(
     ecus={"10": {0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0C, 0x0D, 0x0E, 0x0F,
                  0x10, 0x11, 0x13, 0x14, 0x15, 0x18, 0x19, 0x1C}},
     engine_ecu="10",
-    vin=None,
+    vin="1FMSIMEXP01LA0001",  # this truck does report a VIN, unusually for its year
     idle_rpm=640,
     displacement=5.4,
     gears=[(20, 9), (40, 17), (65, 30), (999, 50)],

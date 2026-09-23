@@ -10,7 +10,10 @@ class FakeTransport:
 
     async def send(self, command: str, timeout: float) -> str:
         self.sent.append(command)
-        return self.responses.get(command, "NO DATA") + "\r\r"
+        reply = self.responses.get(command, "NO DATA")
+        if isinstance(reply, list):  # a scripted sequence; the last reply repeats
+            reply = reply.pop(0) if len(reply) > 1 else reply[0]
+        return reply + "\r\r"
 
     async def close(self) -> None:
         pass
