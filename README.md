@@ -82,6 +82,7 @@ uv run veepeak info                 # protocol, VIN, check-engine light, readine
 uv run veepeak pids                 # read every supported sensor once
 uv run veepeak live                 # stream RPM, speed, temps, fuel trims...
 uv run veepeak live rpm maf o2b1s1 --interval 0.5 --csv drive.csv
+uv run veepeak trims                # live fuel trims, for hunting vacuum leaks
 uv run veepeak dtc                  # stored, pending, permanent codes and freeze frame
 uv run veepeak clear-dtc            # clear codes (asks for confirmation)
 uv run veepeak raw                  # interactive ELM327 console
@@ -104,6 +105,32 @@ map iat maf timing o2b1s1 o2b1s2 o2b2s1 o2b2s2 fuel baro cat1 ambient pedal
 fuelrate torque odometer runtime`) or hex PIDs (`0C`). PIDs the vehicle doesn't
 support are skipped, so e.g. the bank 2 trims drop out on the RAV4's 4-cylinder.
 
+### Hunting a vacuum leak with `trims`
+
+Fuel trim is how much the computer corrects its fuel calculation: 0% means
+no correction, positive means it's adding fuel because the engine is running
+lean. Short term reacts within seconds; long term is what the computer has
+learned. **Add them together** — that's the real correction, and beyond about
+±10% something is wrong.
+
+`veepeak trims` holds a baseline from the first few samples at idle, then
+shows the change from it. Block a suspected leak and the engine needs less
+extra fuel, so the reading drops and the monitor says so:
+
+```
+           short    long    total   change   leaner            richer
+bank 1     +0.0%   +4.7%    +4.7%   -22.7%   ·#··········|············
+engine rpm 715 rpm   coolant temperature 183 °F
+>>> LEANER by 22.7% -- whatever you just blocked is (part of) the leak
+```
+
+To tell a vacuum leak from a sensor or fuel-supply problem, compare idle
+with a held 2000 rpm. A fixed leak is a large share of the small airflow at
+idle and a small share at higher airflow, so its correction shrinks; a MAF
+or fuel-delivery fault stays about the same at both. Multiply the correction
+by the airflow at each point: if a leak is the cause, both give the same
+grams per second of unmetered air.
+
 ## Notes on the 2001 Expedition
 
 - **Protocol:** The PCM uses **SAE J1850 PWM** (ELM327 protocol 1). The tool
@@ -115,10 +142,9 @@ support are skipped, so e.g. the bank 2 trims drop out on the RAV4's 4-cylinder.
 - **Supported PIDs:** Expect roughly 15–20 standard PIDs: load, coolant temp,
   fuel trims, MAP/MAF, RPM, speed, timing, IAT, throttle and O2 sensors.
   Newer PIDs such as fuel level and ambient temperature are usually missing.
-- **Useful for diagnosis:** Fuel trims (`stft1 ltft1 stft2 ltft2`) are the
-  place to start with lean codes like P0171/P0174, which are common on these
-  trucks (often a vacuum leak or a dirty MAF). If long-term trims stay above
-  about +10% at idle but drop toward 0 at 2500 rpm, suspect a vacuum leak.
+- **Useful for diagnosis:** Fuel trims are the place to start with lean codes
+  like P0171/P0174, which are common on these trucks (often a vacuum leak or
+  a dirty MAF). `veepeak trims` is built for this; see above.
 - **Enhanced Ford data (mode 22):** Transmission temperature and similar values
   are Ford-specific and not part of standard OBD-II. `probe` sends mode 22
   requests with the header `C4 10 F1` (sent directly to the PCM) and lists
