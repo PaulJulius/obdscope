@@ -213,3 +213,13 @@ def test_sniff_lists_modules(capsys):
     # The RAV4 profile has no chatter defined, so there is nothing to report.
     assert main(["--simulate", "rav4", "sniff", "--seconds", "1"]) == 0
     assert "No traffic seen" in capsys.readouterr().err
+
+
+def test_modules_sweep_reads_non_powertrain_codes(capsys):
+    assert main(["--simulate", "expedition", "modules"]) == 0
+    out = capsys.readouterr().out
+    assert "module 10" in out and "P0171" in out          # powertrain, via mode 13
+    assert "module 60" in out and "96 00 52 84 00 00" in out
+    assert "B1600  Ford: PATS" in out                      # a body code, decoded
+    assert "C1284" in out
+    assert "module 28" in out and "no codes stored" in out

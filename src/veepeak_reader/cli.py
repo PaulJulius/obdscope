@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 
 from . import reports
+from .dtc import decode_dtcs, describe
 from .elm327 import Elm327, ElmError, NoData
 from .obd import NegativeResponse, Vehicle, ecu_name, primary
 from .pids import DEFAULT_LIVE, PIDS, format_value, parse_pid
@@ -273,6 +274,49 @@ async def cmd_raw(args) -> None:
                 print(f"error: {e}")
 
 
+async def cmd_modules(args) -> None:
+    """Ask every module on the bus for its trouble codes.
+
+    Standard mode 03 only covers emissions. Manufacturers use their own service
+    for other modules -- mode 13 on older Fords -- physically addressed to each
+    one in turn. Reads only.
+    """
+    async with session(args) as v:
+        is_can = v.elm.is_can
+        request = args.request or ("03" if is_can else "13")
+        expected = int(request[:2], 16) + 0x40
+        addresses = range(0x7E0, 0x7E8) if is_can else range(0x00, 0x100)
+        status(f"Asking {len(addresses)} addresses for codes with mode {request} "
+               f"(about {max(1, round(len(addresses) * 0.4 / 60))} min)...")
+
+        found = 0
+        for index, address in enumerate(addresses):
+            if not is_can and index and index % 64 == 0:
+                status(f"  ...{index}/{len(addresses)}")
+            header = f"{address:03X}" if is_can else f"C4{address:02X}F1"
+            await v.elm.command(f"ATSH{header}")
+            try:
+                messages = await v.elm.request(request, timeout=2.0, attempts=1)
+            except (NoData, ElmError):
+                continue
+            for ecu, msgs in messages.items():
+                for message in msgs:
+                    if not message or message[0] != expected:
+                        continue
+                    payload = message[2:] if is_can else message[1:]
+                    codes = decode_dtcs(payload)
+                    found += 1
+                    print(f"\nmodule {address:02X} (answers as {ecu})   {payload.hex(' ').upper()}")
+                    for code in codes:
+                        print(f"  {code}  {describe(code) or '(look this one up: not a generic code)'}")
+                    if not codes:
+                        print("  no codes stored")
+        status(f"\n{found} module(s) answered.")
+        if not is_can:
+            status("Codes from non-powertrain modules are manufacturer-specific; the letter\n"
+                   "(B = body, C = chassis, U = network) tells you which system.")
+
+
 async def cmd_sniff(args) -> None:
     """Listen to the bus and report which modules are talking.
 
@@ -411,6 +455,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("commands", nargs="*")
     p.add_argument("--timeout", type=float, default=5.0)
     p.set_defaults(func=cmd_raw)
+
+    p = add("modules", help="ask every module on the bus for its trouble codes")
+    p.add_argument("--request", help="service to send (default: 13 on older buses, 03 on CAN)")
+    p.set_defaults(func=cmd_modules)
 
     p = add("sniff", help="listen to bus traffic and list the modules that are talking")
     p.add_argument("--seconds", type=float, default=10.0, help="how long to listen")

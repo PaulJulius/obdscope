@@ -42,6 +42,9 @@ DESCRIPTIONS = {
     "P0750": "Shift solenoid A malfunction",
     "P0755": "Shift solenoid B malfunction",
     "P1000": "Ford: OBD-II monitor testing not complete (normal after clearing codes)",
+    # Non-powertrain modules report manufacturer-specific codes (B = body,
+    # C = chassis, U = network), read with the maker's own service, not mode 03.
+    "B1600": "Ford: PATS ignition key transponder signal not received",
     "P1131": "Ford: Lack of upstream O2 switch, sensor indicates lean, bank 1",
     "P1151": "Ford: Lack of upstream O2 switch, sensor indicates lean, bank 2",
 }

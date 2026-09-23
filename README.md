@@ -91,6 +91,7 @@ uv run veepeak clear-dtc            # clear codes (asks for confirmation)
 uv run veepeak raw                  # interactive ELM327 console
 uv run veepeak raw ATRV 010C        # one-shot raw commands
 uv run veepeak sniff                # listen to the bus, list the modules talking
+uv run veepeak modules              # ask every module on the bus for its codes
 uv run veepeak probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
 ```
 
@@ -167,9 +168,14 @@ nothing), then address one directly with `raw`. Manufacturers use their own
 services for this — older Fords read codes with mode `13` rather than `03`:
 
 ```sh
-uv run veepeak sniff                       # which modules are on the bus
-uv run veepeak raw ATSHC460F1 13           # ask module 60 for its codes
+uv run veepeak sniff       # which modules are transmitting
+uv run veepeak modules     # ask each address for codes and decode them
 ```
+
+`modules` sweeps every address (a couple of minutes on a pre-CAN bus) and
+decodes what comes back. Codes from these modules are manufacturer-specific:
+the letter says which system (B = body, C = chassis, U = network), and you'll
+need a marque-specific list to look most of them up.
 
 Be aware that many vehicles put safety and body modules on a separate network
 whose pins a standard ELM327 adapter doesn't wire up. If a module never

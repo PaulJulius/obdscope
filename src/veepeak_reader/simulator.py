@@ -90,6 +90,9 @@ class Profile:
     enhanced: dict[str, dict[int, Callable[[DriveState], bytes]]]  # physical header -> DID -> encoder
     distance_since_clear: float         # km
     minutes_since_clear: float
+    # Codes held by modules that aren't the powertrain, keyed by address. Read with
+    # mode 13 (Ford's service on this bus), not standard mode 03.
+    module_dtcs: dict[str, list[str]] = field(default_factory=dict)
     # Periodic chatter as (priority, target, source, payload) hex; invented, but shaped
     # like real traffic: several modules besides the powertrain share the bus.
     chatter: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -135,6 +138,7 @@ EXPEDITION = Profile(
             0x11B0: lambda s: bytes([0x02 if s.closed_loop else 0x01]),
         },
     },
+    module_dtcs={"60": ["B1600", "C1284"], "28": [], "40": []},
     chatter=[
         ("3D", "60", "10", "05 20 1A 00"),   # powertrain
         ("3D", "60", "40", "10 04 00 00"),   # restraints-like module
@@ -417,13 +421,24 @@ class SimulatedTransport:
         header = self.header or "616AF1"
         if header == "616AF1":
             return ecus if request[0] != 0x22 else []
-        return [self.profile.engine_ecu] if header == "C410F1" else []
+        # Physical addressing, "C4 <module> F1": the powertrain or another module.
+        if len(header) == 6 and header.startswith("C4") and header.endswith("F1"):
+            module = header[2:4]
+            if module in ecus or module in self.profile.module_dtcs:
+                return [module]
+        return []
 
     # Vehicle responses: each returns complete messages (response SID first)
 
     def _respond(self, ecu: str, request: bytes, state: DriveState) -> list[bytes]:
         mode, rest = request[0], request[1:]
         engine = ecu == self.profile.engine_ecu
+        if ecu not in self.profile.ecus:  # a module that only does manufacturer diagnostics
+            if mode == 0x13 and not rest:
+                return _legacy_dtc_messages(0x53, self.profile.module_dtcs.get(ecu, []))
+            return [bytes([0x7F, mode, 0x11])]
+        if mode == 0x13 and not rest and not self.is_can:
+            return _legacy_dtc_messages(0x53, self._dtcs()[0])
         if mode == 0x01 and len(rest) == 1:
             data = self._pid(ecu, rest[0], state)
             return [bytes([0x41, rest[0]]) + data] if data is not None else []
@@ -587,12 +602,9 @@ class SimulatedTransport:
         if not engine:
             codes = []
         sid = mode + 0x40
-        packed = b"".join(_encode_dtc(c) for c in codes)
         if self.is_can:
-            return [bytes([sid, len(codes)]) + packed]
-        # Legacy: three codes per message, zero padded; always at least one message.
-        chunks = [packed[i : i + 6] for i in range(0, len(packed), 6)] or [b""]
-        return [bytes([sid]) + chunk.ljust(6, b"\x00") for chunk in chunks]
+            return [bytes([sid, len(codes)]) + b"".join(_encode_dtc(c) for c in codes)]
+        return _legacy_dtc_messages(sid, codes)
 
     def _clear(self) -> None:
         self.stored, self.pending, self.freeze = [], [], None
@@ -649,6 +661,13 @@ _AT_WITH_HEX_ARG = ("ST", "CRA", "CF", "CM", "SW", "TA", "WM", "IIA")
 
 def _is_hex(text: str) -> bool:
     return all(c in "0123456789ABCDEF" for c in text)
+
+
+def _legacy_dtc_messages(sid: int, codes: list[str]) -> list[bytes]:
+    """Three codes per message, zero padded, as legacy buses report them."""
+    packed = b"".join(_encode_dtc(c) for c in codes)
+    chunks = [packed[i : i + 6] for i in range(0, len(packed), 6)] or [b""]
+    return [bytes([sid]) + chunk.ljust(6, b"\x00") for chunk in chunks]
 
 
 def _encode_dtc(code: str) -> bytes:
