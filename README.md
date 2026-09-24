@@ -31,7 +31,7 @@ are responsible for what you do to your vehicle.
 
 - **Hardware:** one Veepeak OBDCheck BLE (reporting `ELM327 v1.5`), on macOS.
 - **Vehicles:** a 2001 Ford Expedition XLT (J1850 PWM) — info, codes, live
-  data, module sweeps and monitoring all confirmed against the real truck.
+  data, module sweeps and monitoring all confirmed against the real SUV.
 - **Everything else,** including the whole CAN path, is exercised only against
   the simulator and scripted fakes. It follows the standards and the parsing is
   tested, but it has never met a real CAN vehicle. Reports welcome.
@@ -72,7 +72,7 @@ loop.
 | --- | --- | --- |
 | Protocol | J1850 PWM, one PCM (`10`) | CAN 11-bit, engine `7E8` + transmission `7E9` |
 | Check engine light | On: P0171, P0174 (lean, both banks) | Off. Pending P0456 (tiny evap leak) |
-| VIN | reported (as the real truck does) | reported |
+| VIN | reported (as the real SUV does) | reported |
 | What to notice | Long-term fuel trims around +14% at idle, near +3% at speed: a vacuum-leak pattern. Clear the codes and P0171 returns as pending about a minute later. | VIN, permanent codes, wideband O2 (`Wideband O2 B1S1 lambda`), catalyst temperature |
 | `probe` finds | a few DIDs in `1100`–`11FF` | DIDs in `1000`–`10FF` (engine), `--header 7E1` for transmission |
 

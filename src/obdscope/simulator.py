@@ -116,7 +116,7 @@ EXPEDITION = Profile(
     ecus={"10": {0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0C, 0x0D, 0x0E, 0x0F,
                  0x10, 0x11, 0x13, 0x14, 0x15, 0x18, 0x19, 0x1C}},
     engine_ecu="10",
-    vin="1FMSIMEXP01LA0001",  # this truck does report a VIN, unusually for its year
+    vin="1FMSIMEXP01LA0001",  # this SUV does report a VIN, unusually for its year
     idle_rpm=640,
     displacement=5.4,
     gears=[(20, 9), (40, 17), (65, 30), (999, 50)],
