@@ -5,6 +5,30 @@ A command-line tool for reading OBD-II data through a **Veepeak OBDCheck BLE**
 vehicle, pre-CAN or modern, and detects the protocol automatically. It ships
 with two simulated vehicles so you can use it without a car.
 
+## Safety and scope
+
+Reading data is harmless. Two commands are not passive, so know what they do:
+
+- **`clear-dtc`** erases stored codes *and* resets the readiness monitors. A
+  vehicle with incomplete monitors fails an emissions inspection until several
+  days of driving complete them. It asks for confirmation first.
+- **`probe`** sends manufacturer-specific requests (mode 22) to a module. It
+  only reads, but these requests are undocumented and vary by vehicle.
+
+Don't operate this while driving; have a passenger do it, or log to CSV and
+read it afterwards. Diagnostics tell you what a vehicle reports, not whether
+it is safe to drive. This software comes with no warranty (see LICENSE) — you
+are responsible for what you do to your vehicle.
+
+## What has been tested
+
+- **Hardware:** one Veepeak OBDCheck BLE (reporting `ELM327 v1.5`), on macOS.
+- **Vehicles:** a 2001 Ford Expedition XLT (J1850 PWM) — info, codes, live
+  data, module sweeps and monitoring all confirmed against the real truck.
+- **Everything else,** including the whole CAN path, is exercised only against
+  the simulator and scripted fakes. It follows the standards and the parsing is
+  tested, but it has never met a real CAN vehicle. Reports welcome.
+
 ## Setup
 
 ```sh
@@ -183,6 +207,18 @@ answers, it may simply be unreachable with this hardware.
 
 **Your own vehicle notes:** `notes/` is gitignored, a place to keep VINs,
 supported PIDs, measurements and findings per vehicle without committing them.
+
+## Related projects
+
+[python-OBD](https://github.com/brendan-w/python-OBD) is the established
+library in this space and supports more adapters and PID definitions. This
+project differs in being BLE-native (no serial port pairing, which is what
+macOS needs for these adapters), in shipping a web dashboard and full vehicle
+simulators, and in reaching non-powertrain modules.
+
+This is a hobby project, maintained as time allows. Bug reports are welcome,
+but most vehicle-specific issues can't be reproduced without that vehicle —
+a `--log` transcript makes them far more actionable.
 
 ## Development
 
