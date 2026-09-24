@@ -24,7 +24,7 @@ Reading data is harmless. Two commands are not passive, so know what they do:
 
 Don't operate this while driving; have a passenger do it, or log to CSV and
 read it afterwards. Diagnostics tell you what a vehicle reports, not whether
-it is safe to drive. This software comes with no warranty (see LICENSE) — you
+it is safe to drive. This software comes with no warranty (see [LICENSE](LICENSE)) — you
 are responsible for what you do to your vehicle.
 
 ## What has been tested
