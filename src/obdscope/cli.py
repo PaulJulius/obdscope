@@ -415,7 +415,7 @@ def _add_global_options(parser: argparse.ArgumentParser, with_defaults: bool) ->
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="veepeak", description="Read OBD-II data via a Veepeak OBDCheck BLE adapter.")
+    parser = argparse.ArgumentParser(prog="obdscope", description="Read OBD-II data via a Veepeak OBDCheck BLE adapter.")
     _add_global_options(parser, with_defaults=True)
     common = argparse.ArgumentParser(add_help=False)
     _add_global_options(common, with_defaults=False)
@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.log:
         handler = logging.FileHandler(args.log)
         handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-        elm_log = logging.getLogger("veepeak_reader.elm327")
+        elm_log = logging.getLogger("obdscope.elm327")
         elm_log.addHandler(handler)
         elm_log.setLevel(logging.DEBUG)
     try:

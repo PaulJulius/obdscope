@@ -2,12 +2,12 @@
 
 import pytest
 
-from veepeak_reader import reports
-from veepeak_reader.cli import main
-from veepeak_reader.elm327 import Elm327, ElmError, NoData
-from veepeak_reader.obd import NegativeResponse, Vehicle, primary
-from veepeak_reader.pids import PIDS, decode_monitor_status
-from veepeak_reader.simulator import PROFILES, SimulatedTransport
+from obdscope import reports
+from obdscope.cli import main
+from obdscope.elm327 import Elm327, ElmError, NoData
+from obdscope.obd import NegativeResponse, Vehicle, primary
+from obdscope.pids import PIDS, decode_monitor_status
+from obdscope.simulator import PROFILES, SimulatedTransport
 
 # Plausible ranges for decoded values (metric units), used to sanity-check every sample.
 RANGES = {

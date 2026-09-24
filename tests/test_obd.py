@@ -2,10 +2,10 @@
 
 import pytest
 
-from veepeak_reader.dtc import decode_dtcs
-from veepeak_reader.elm327 import Elm327, ElmError, NoData, parse_response
-from veepeak_reader.obd import NegativeResponse, Vehicle, ecu_name, primary
-from veepeak_reader.pids import PIDS, decode_monitor_status, decode_supported, format_value, parse_pid
+from obdscope.dtc import decode_dtcs
+from obdscope.elm327 import Elm327, ElmError, NoData, parse_response
+from obdscope.obd import NegativeResponse, Vehicle, ecu_name, primary
+from obdscope.pids import PIDS, decode_monitor_status, decode_supported, format_value, parse_pid
 
 from fakes import CAN_INIT, PWM_INIT, FakeBleTransport, FakeTransport
 
@@ -211,7 +211,7 @@ async def test_gives_up_after_repeated_corruption():
 
 def test_trim_monitor_flags_a_blocked_leak(monkeypatch, capsys):
     """Long term trim +27% then dropping to +5%: what blocking the leak looks like."""
-    from veepeak_reader import cli
+    from obdscope import cli
 
     high, low = "41 6B 10 41 07 A3 00", "41 6B 10 41 07 86 00"
     transport = FakeBleTransport({

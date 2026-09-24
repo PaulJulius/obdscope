@@ -1,6 +1,6 @@
 import pytest
 
-from veepeak_reader import simulator
+from obdscope import simulator
 
 
 @pytest.fixture(autouse=True)

@@ -1,9 +1,16 @@
-# veepeak-reader
+# obdscope
 
-A command-line tool for reading OBD-II data through a **Veepeak OBDCheck BLE**
-(ELM327-compatible, Bluetooth Low Energy) adapter. It works with any OBD-II
-vehicle, pre-CAN or modern, and detects the protocol automatically. It ships
-with two simulated vehicles so you can use it without a car.
+**Read your car's data from a Veepeak OBDCheck BLE adapter** (or any other
+ELM327-compatible Bluetooth Low Energy dongle) on macOS and Linux.
+
+A command line tool and a web dashboard: live gauges, trouble codes, freeze
+frames, fuel trims for chasing vacuum leaks, and codes from modules that
+standard OBD-II can't reach. It works with any OBD-II vehicle, pre-CAN or
+modern, and detects the protocol automatically. Two simulated vehicles let you
+try all of it without a car.
+
+New to this? You need the adapter plugged into the OBD-II port under the dash,
+the ignition on, and `uv run obdscope ui`.
 
 ## Safety and scope
 
@@ -33,7 +40,7 @@ are responsible for what you do to your vehicle.
 
 ```sh
 uv sync
-uv run veepeak --help
+uv run obdscope --help
 ```
 
 On macOS, the app that runs the command (Terminal, iTerm, VS Code) needs
@@ -48,10 +55,10 @@ simulated vehicle instead of the adapter. You don't need the adapter,
 Bluetooth, or the car:
 
 ```sh
-uv run veepeak ui --simulate expedition     # or pick a vehicle next to Connect
-uv run veepeak live --simulate rav4
-uv run veepeak dtc --simulate expedition
-uv run veepeak raw --simulate rav4          # type ATZ, 010C, 0902...
+uv run obdscope ui --simulate expedition     # or pick a vehicle next to Connect
+uv run obdscope live --simulate rav4
+uv run obdscope dtc --simulate expedition
+uv run obdscope raw --simulate rav4          # type ATZ, 010C, 0902...
 ```
 
 The simulator answers the same ELM327 commands as the real adapter, using
@@ -76,7 +83,7 @@ They don't match real Ford or Toyota identifiers. The simulated VIN
 ## Web dashboard
 
 ```sh
-uv run veepeak ui
+uv run obdscope ui
 ```
 
 This opens a page in your browser with three tabs:
@@ -85,15 +92,15 @@ This opens a page in your browser with three tabs:
   gauges, change the sample rate, switch °F/°C, and record to CSV. Recordings
   are saved to `recordings/`.
   **Leak hunt** adds a panel with the total fuel correction per bank against
-  a baseline, the same workflow as `veepeak trims` but readable from a phone
-  while you're under the hood (`veepeak ui --host 0.0.0.0`).
+  a baseline, the same workflow as `obdscope trims` but readable from a phone
+  while you're under the hood (`obdscope ui --host 0.0.0.0`).
 - **Trouble codes:** stored, pending and permanent codes, and the freeze frame.
   Clearing codes asks for confirmation first.
 - **Vehicle:** VIN, readiness monitors, supported PIDs, and a one-time read of
   every sensor.
 
 The server only accepts connections from this Mac. To view the dashboard on a
-phone on the same Wi-Fi, run `uv run veepeak ui --host 0.0.0.0` and open
+phone on the same Wi-Fi, run `uv run obdscope ui --host 0.0.0.0` and open
 `http://<mac-name>.local:8765/`. There's no password, so anyone on that
 network could also clear codes. Only use `--host 0.0.0.0` on a network you
 trust.
@@ -104,19 +111,19 @@ Plug in the adapter, turn the ignition to ON (the engine can be off for most
 commands), then:
 
 ```sh
-uv run veepeak scan                 # find the adapter (marked with *)
-uv run veepeak info                 # protocol, VIN, check-engine light, readiness monitors
-uv run veepeak pids                 # read every supported sensor once
-uv run veepeak live                 # stream RPM, speed, temps, fuel trims...
-uv run veepeak live rpm maf o2b1s1 --interval 0.5 --csv drive.csv
-uv run veepeak trims                # live fuel trims, for hunting vacuum leaks
-uv run veepeak dtc                  # stored, pending, permanent codes and freeze frame
-uv run veepeak clear-dtc            # clear codes (asks for confirmation)
-uv run veepeak raw                  # interactive ELM327 console
-uv run veepeak raw ATRV 010C        # one-shot raw commands
-uv run veepeak sniff                # listen to the bus, list the modules talking
-uv run veepeak modules              # ask every module on the bus for its codes
-uv run veepeak probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
+uv run obdscope scan                 # find the adapter (marked with *)
+uv run obdscope info                 # protocol, VIN, check-engine light, readiness monitors
+uv run obdscope pids                 # read every supported sensor once
+uv run obdscope live                 # stream RPM, speed, temps, fuel trims...
+uv run obdscope live rpm maf o2b1s1 --interval 0.5 --csv drive.csv
+uv run obdscope trims                # live fuel trims, for hunting vacuum leaks
+uv run obdscope dtc                  # stored, pending, permanent codes and freeze frame
+uv run obdscope clear-dtc            # clear codes (asks for confirmation)
+uv run obdscope raw                  # interactive ELM327 console
+uv run obdscope raw ATRV 010C        # one-shot raw commands
+uv run obdscope sniff                # listen to the bus, list the modules talking
+uv run obdscope modules              # ask every module on the bus for its codes
+uv run obdscope probe 1100 11FF      # sweep manufacturer (mode 22) identifiers
 ```
 
 Global options can go before or after the command:
@@ -142,7 +149,7 @@ lean. Short term reacts within seconds; long term is what the computer has
 learned. **Add them together** — that's the real correction, and beyond about
 ±10% something is wrong.
 
-`veepeak trims` holds a baseline from the first few samples at idle, then
+`obdscope trims` holds a baseline from the first few samples at idle, then
 shows the change from it. Block a suspected leak and the engine needs less
 extra fuel, so the reading drops and the monitor says so:
 
@@ -192,8 +199,8 @@ nothing), then address one directly with `raw`. Manufacturers use their own
 services for this — older Fords read codes with mode `13` rather than `03`:
 
 ```sh
-uv run veepeak sniff       # which modules are transmitting
-uv run veepeak modules     # ask each address for codes and decode them
+uv run obdscope sniff       # which modules are transmitting
+uv run obdscope modules     # ask each address for codes and decode them
 ```
 
 `modules` sweeps every address (a couple of minutes on a pre-CAN bus) and
@@ -234,6 +241,6 @@ hardware is needed. Code layout:
 - `obd.py`: OBD services (modes 01, 02, 03/07/0A, 04, 09, 22), ECU naming
 - `pids.py` and `dtc.py`: decoders and descriptions
 - `reports.py`: multi-request reports (vehicle info, all sensors, trouble codes) shared by CLI and UI
-- `cli.py`: the `veepeak` command
-- `web.py` and `static/index.html`: the `veepeak ui` server and single-page dashboard
+- `cli.py`: the `obdscope` command
+- `web.py` and `static/index.html`: the `obdscope ui` server and single-page dashboard
 - `simulator.py`: simulated adapter and vehicles (`--simulate`)

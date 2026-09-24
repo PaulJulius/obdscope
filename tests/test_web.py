@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from veepeak_reader import web
-from veepeak_reader.transport import make_transport
+from obdscope import web
+from obdscope.transport import make_transport
 
 from fakes import CAN_INIT, FakeBleTransport
 

@@ -1,7 +1,7 @@
 [project]
-name = "veepeak-reader"
+name = "obdscope"
 version = "0.1.0"
-description = "Read OBD-II data from a Veepeak OBDCheck BLE (ELM327) adapter"
+description = "Read your car's data from a Veepeak OBDCheck BLE or other ELM327 Bluetooth adapter: CLI and web dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -10,8 +10,19 @@ dependencies = [
     "bleak>=0.22",
 ]
 
+keywords = ["veepeak", "obdcheck", "elm327", "obd2", "obdii", "bluetooth", "ble", "car", "diagnostics", "automotive"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+]
+
 [project.scripts]
-veepeak = "veepeak_reader.cli:main"
+obdscope = "obdscope.cli:main"
+veepeak = "obdscope.cli:main"   # the old name, kept as an alias
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
