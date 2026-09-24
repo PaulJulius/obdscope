@@ -1,4 +1,4 @@
-"""Command-line interface: ``veepeak <command>``."""
+"""Command-line interface: ``obdscope <command>``."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ FORD_PWM_PCM_HEADER = "C410F1"  # priority C4, target PCM (10), tester (F1)
 CAN_ENGINE_HEADER = "7E0"  # physical request ID of the engine ECU (answers on 7E8)
 VEHICLE_HINT = (
     "The adapter is connected but the vehicle's computer isn't answering. Turn the ignition to ON\n"
-    "(dash lights up; the engine doesn't need to run). Adapter-only commands still work: `veepeak raw ATRV`."
+    "(dash lights up; the engine doesn't need to run). Adapter-only commands still work: `obdscope raw ATRV`."
 )
 
 
@@ -350,7 +350,7 @@ async def cmd_sniff(args) -> None:
             print(f"{key:<10} {entry['count']:>6}  {source:<6} {target:<6} {entry['sample'][:24]:<24} "
                   f"{' '.join(sorted(entry['modes'])[:6])}")
         print("\n'from' is the module that sent the frame. To talk to one directly, set the header\n"
-              "to its address, e.g. `veepeak raw ATSHC4<from>F1 <request>`.")
+              "to its address, e.g. `obdscope raw ATSHC4<from>F1 <request>`.")
 
 
 def _is_hex_byte(token: str) -> bool:
@@ -398,7 +398,7 @@ def _add_global_options(parser: argparse.ArgumentParser, with_defaults: bool) ->
     before the command isn't overwritten by the subcommand's default.
     """
     default = (lambda value: value) if with_defaults else (lambda value: argparse.SUPPRESS)
-    parser.add_argument("--address", default=default(None), help="BLE address/UUID of the adapter (see `veepeak scan`)")
+    parser.add_argument("--address", default=default(None), help="BLE address/UUID of the adapter (see `obdscope scan`)")
     parser.add_argument("--name", default=default(None), help="match adapter by (partial) BLE name instead of auto-detect")
     parser.add_argument(
         "--simulate", choices=sorted(PROFILES), default=default(None),

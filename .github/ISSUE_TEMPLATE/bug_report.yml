@@ -1,0 +1,51 @@
+name: Bug report
+description: Something didn't work with your vehicle or adapter
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most problems are specific to one vehicle or adapter, which makes them
+        impossible to reproduce here. A log transcript is what makes a report
+        actionable — it records every exchange with the adapter.
+  - type: input
+    id: vehicle
+    attributes:
+      label: Vehicle
+      placeholder: 2001 Ford Expedition XLT, 5.4L
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Adapter
+      description: What `obdscope raw ATI` reports, if you can get that far.
+      placeholder: Veepeak OBDCheck BLE, reports ELM327 v1.5
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command you ran
+      placeholder: obdscope --log session.log pids
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log transcript
+      description: |
+        Re-run with `--log session.log` and paste it here. It contains no
+        personal data beyond your VIN, if the vehicle reports one — remove that
+        line if you'd rather not share it.
+      render: text
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Python version
+      placeholder: macOS 15.3, Python 3.12

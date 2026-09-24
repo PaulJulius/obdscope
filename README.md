@@ -1,5 +1,7 @@
 # obdscope
 
+[![tests](https://github.com/PaulJulius/obdscope/actions/workflows/ci.yml/badge.svg)](https://github.com/PaulJulius/obdscope/actions/workflows/ci.yml)
+
 **Read your car's data from a Veepeak OBDCheck BLE adapter** (or any other
 ELM327-compatible Bluetooth Low Energy dongle) on macOS and Linux.
 
@@ -11,6 +13,11 @@ try all of it without a car.
 
 New to this? You need the adapter plugged into the OBD-II port under the dash,
 the ignition on, and `uv run obdscope ui`.
+
+![The dashboard: live gauges for RPM, speed, coolant, load, throttle and fuel
+trims, each with a trend line](docs/dashboard.png)
+
+*The dashboard, connected to one of the built-in simulated vehicles.*
 
 ## Safety and scope
 
@@ -98,6 +105,10 @@ This opens a page in your browser with three tabs:
   Clearing codes asks for confirmation first.
 - **Vehicle:** VIN, readiness monitors, supported PIDs, and a one-time read of
   every sensor.
+
+![Leak hunt: total fuel correction per bank against a baseline, with a
+leaner/richer track and a message reading "LEANER by 9.4% — whatever you just
+blocked is (part of) the leak"](docs/leak-hunt.png)
 
 The server only accepts connections from this Mac. To view the dashboard on a
 phone on the same Wi-Fi, run `uv run obdscope ui --host 0.0.0.0` and open

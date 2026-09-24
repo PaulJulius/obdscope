@@ -61,7 +61,7 @@ async def connect(client, source: str | None = None) -> None:
 async def test_serves_page(client):
     resp = await client.get("/")
     assert resp.status == 200
-    assert "<title>veepeak</title>" in await resp.text()
+    assert "<title>obdscope</title>" in await resp.text()
 
 
 async def test_connect_picks_supported_default_gauges(client):
@@ -151,7 +151,7 @@ async def test_serve_starts_and_shuts_down(capsys):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert "veepeak UI running at http://localhost:0/" in capsys.readouterr().out
+    assert "obdscope UI running at http://localhost:0/" in capsys.readouterr().out
 
 
 async def test_connect_to_simulated_vehicles(client):

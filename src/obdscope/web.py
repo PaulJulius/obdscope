@@ -1,4 +1,4 @@
-"""Local web UI: ``veepeak ui``.
+"""Local web UI: ``obdscope ui``.
 
 One process owns the BLE connection. A background task polls the selected
 gauge PIDs and pushes samples to every open browser tab over Server-Sent
@@ -376,7 +376,7 @@ async def serve(args) -> None:
     await runner.setup()
     await web.TCPSite(runner, args.host, args.port).start()
     url = f"http://{'localhost' if app[LOOPBACK] else args.host}:{args.port}/"
-    print(f"veepeak UI running at {url}  (Ctrl-C to stop)", flush=True)
+    print(f"obdscope UI running at {url}  (Ctrl-C to stop)", flush=True)
     if not app[LOOPBACK]:
         print("warning: the UI is reachable from your network with no password, including 'clear codes'.")
     if not args.no_browser:

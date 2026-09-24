@@ -132,7 +132,7 @@ class BleTransport:
         if not candidates:
             raise TransportError(
                 "no OBD adapter found. Is the ignition on and the adapter's light lit? "
-                "Run `veepeak scan` to list nearby devices, then pass --address."
+                "Run `obdscope scan` to list nearby devices, then pass --address."
             )
         return candidates[0].device
 
